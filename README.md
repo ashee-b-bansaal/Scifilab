@@ -1,8 +1,11 @@
 # Scifilab
 
-Step 1: install ollama 
+Step 1: LLAMA
 
-In the desired folder, install the latest version of llama 
-
+- Install the software ollama (directly from the website)
+- Install the  latest version of llama:
 `ollama pull llama3.2:latest
+`
+- Ensure it works properly:
+`ollama run llama3.2
 `
