@@ -1,5 +1,5 @@
-cv2
+opencv-python
 requests
-json
 SpeechRecognition
-
+pyaudio
+pipwin; sys_platform == "win32"
