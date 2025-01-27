@@ -34,8 +34,6 @@ class CameraHandler():
             font_scale = 1
             font_color = (0, 255, 0)
             thickness = 10
-            cv2.putText(frame, 'Hello', position, font, font_scale, font_color, thickness)
-
 
             cv2.putText(frame, self.text_overlay, position, font, font_scale, font_color, thickness)
             cv2.imshow('Video Feed', frame)

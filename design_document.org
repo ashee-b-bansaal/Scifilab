@@ -1,0 +1,19 @@
+* Design document for Real-Time LLM Interaction Project
+
+** Project description:
+
+AR software which allows the user to speak and then recieve a response
+from an llm.
+
+** Interface
+
+The UI captures the camera view from a camera attached to a pair of
+glasses to simulate AR. There are floating text prompts which tells
+the user when they should speak and what the output of the LLM is.
+
+
+** Design considerations:
+- 
+  There should be an UI class: UserInterface which displays the camera view and text.
+-
+  

@@ -36,3 +36,6 @@ class LlamaHandler():
         response = self.llama3(self.specific_prompt(3) + str(keywords))
         return response
 
+if __name__ == "__main__":
+    a = LlamaHandler()
+    print(a.answer("cat"))

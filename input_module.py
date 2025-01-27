@@ -1,3 +1,4 @@
+import sounddevice
 import speech_recognition as sr
 
 class InputHandler():
@@ -7,11 +8,11 @@ class InputHandler():
         """
         recognizer = sr.Recognizer()
         with sr.Microphone() as source:
-            #print("Listening... (Speak now)")
+            # print("Listening... (Speak now)")
             try:
-                audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
+                audio = recognizer.listen(source, timeout=5, phrase_time_limit = 10)
                 text = recognizer.recognize_google(audio)
-                #print(f"Voice input recognized: {text}")
+                # print(f"Voice input recognized: {text}")
                 return text
             except sr.UnknownValueError:
                 print("Sorry, I couldn't understand the audio.")
@@ -29,3 +30,9 @@ class InputHandler():
     #     """
     #     user_input = input("Enter your text: ")
     #     return user_input
+
+
+if __name__ == "__main__":
+    a = InputHandler()
+    print(a.record_voice_input())
+
