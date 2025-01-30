@@ -3,9 +3,14 @@ from typing import Callable
 import queue
 from ollama import chat
 
-# prompt = "Generate an 1 sentence sad response, neutral response, happy response to the" \
-#     "following using context from our conversation: "
-prompt = ""
+NUMBER_OF_OPTIONS = 3
+
+voice_rec_prompt = "Generate a short 1 sentence sad response, a short 1 sentence neutral response, a short 1 sentence happy response to the" \
+    "following for me to choose in numbered format, each on its own line(example 1. sad:, 2. neutral, 3. happy ): "
+
+ui_prompt = "This is my response, don't response, just remember what I said: "
+
+# prompt = ""
 
 class Llama():
     def __init__(self, exit_event: threading.Event):
@@ -22,7 +27,7 @@ class Llama():
         self.need_response: bool = False
 
         # message history for ollama
-        self.messages = []
+        self.messages: list[dict] = []
 
     def register_subscriber(self, subscriber_name: str, fn: Callable):
         self.subscribers[subscriber_name] = fn
@@ -34,8 +39,10 @@ class Llama():
         with self.need_response_cond:
             self.need_response_cond.notify()
 
-    def add_prompt_handler(self, new_prompt: str):
-        self.prompt_q.put_nowait(prompt + new_prompt)
+    def add_prompt_handler(self, sender: str, new_prompt: str):
+        self.prompt_q.put_nowait(
+            (sender,
+             (ui_prompt if sender == "ui" else voice_rec_prompt) + new_prompt))
         self.need_response = True
         with self.need_response_cond:
             self.need_response_cond.notify()
@@ -51,7 +58,15 @@ class Llama():
                         self.need_response_cond.wait()
                     if self.exit_event.is_set():
                         break
-                    new_prompt: str = self.prompt_q.get_nowait()
+                    sender, new_prompt = self.prompt_q.get_nowait()
+                    # has to vary behavior based on sender maybe?
+                    # sender can be gui thread which chooses a response
+                    # or the voice rec thread which gives the llm the user's
+                    # voice input
+
+                    # if gui is sending then response will be given to tts
+                    # if voice_rec is sending then response will be given
+                    # to gui to display
 
                     new_message = {
                         'role': 'user',
@@ -67,8 +82,21 @@ class Llama():
                         {'role': 'user', 'content': response_content}
                     ]
 
-                    print("llm response is", response_content)
+
                     self.need_response = False
+
+                    if sender == "ui":
+                        # do tts, have to synchronize threads
+                        # if tts is done then this will call the registered voice rec call back
+                        # to request user voice input
+                        pass
+                    elif sender == "voice_rec":
+                        
+                        self.notify_subscriber(
+                            "gui-recieve-llama-response",
+                            response_content
+                        )
+                    print(f"llm response for {sender} is", response_content)
                 except Exception as e:
                     print(e)
                     self.exit_event.set()

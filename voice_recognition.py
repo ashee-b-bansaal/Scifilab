@@ -72,7 +72,11 @@ class VoiceRecognition():
                         text = recognizer.recognize_google(audio)
                         self.need_recording = False
                         print(f"Voice input recognized: {text}")
-                        self.notify_subscriber("llama-add-prompt", text)
+                        self.notify_subscriber(
+                            "llama-add-prompt",
+                            "voice_rec",
+                            text
+                        )
                     except sr.UnknownValueError:
                         print("Sorry, I couldn't understand the audio.")
                     except sr.RequestError as e:
