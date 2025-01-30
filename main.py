@@ -1,7 +1,7 @@
 import threading
 import queue
 from input_module import InputHandler
-from llama_module import LlamaHandler
+import llama_module 
 from camera_module import CameraHandler
 
 # Global variable to store the text displayed on the video feed
@@ -16,7 +16,7 @@ def update_text_on_video():
         print("PLEASE SPEAK NOW")
         user_input = input_handler.record_voice_input()
         print("input is : ", user_input)
-        responses = llama_handler.answer(user_input)
+        responses = llama_handler(user_input)
         llama_responses_queue.put_nowait(responses)
         # text_on_video = "\n".join(responses)
 
