@@ -23,8 +23,8 @@ class VoiceRecognition():
     def register_subscriber(self, subscriber_name: str, fn: Callable):
         self.subscribers[subscriber_name] = fn
 
-    def notify_subsciber(self, subscriber_name: str):
-        self.subscribers[subscriber_name]()
+    def notify_subscriber(self, subscriber_name: str, *args):
+        self.subscribers[subscriber_name](*args)
 
     def voice_start_handler(self):
         """
@@ -72,6 +72,7 @@ class VoiceRecognition():
                         text = recognizer.recognize_google(audio)
                         self.need_recording = False
                         print(f"Voice input recognized: {text}")
+                        self.notify_subscriber("llama-add-prompt", text)
                     except sr.UnknownValueError:
                         print("Sorry, I couldn't understand the audio.")
                     except sr.RequestError as e:

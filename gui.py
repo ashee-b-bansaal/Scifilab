@@ -3,6 +3,7 @@ import numpy as np
 import threading
 from typing import Callable
 from voice_recognition import VoiceRecognition
+from llama_module import Llama
 
 class GUIClass():
     """
@@ -20,15 +21,15 @@ class GUIClass():
         self.subscribers: dict[str, Callable] = dict()
 
         # the order by which to render the elements.
-        self.render_order : list[str]= []
+        self.render_order: list[str] = []
 
         # key is name : str, value is function to draw on canvas
-        self.render_functions : dict[str, Callable] = dict()
+        self.render_functions: dict[str, Callable] = dict()
 
         # whether the thing to render is ready to be rendered
         # (call the function in render_functions).
         # key is str, value is bool
-        self.render_ready : dict[str, bool] = dict()
+        self.render_ready: dict[str, bool] = dict()
 
         # canvas to draw everything on, in the render method,
         # this should be updated as the camera read frames.
@@ -43,8 +44,8 @@ class GUIClass():
     def register_subscriber(self, subscriber_name: str, fn: Callable):
         self.subscribers[subscriber_name] = fn
 
-    def notify_subscriber(self, subsciber_name: str):
-        self.subscribers[subsciber_name]()
+    def notify_subscriber(self, subsciber_name: str, *args):
+        self.subscribers[subsciber_name](*args)
 
     def update_canvas(self):
         """
@@ -91,16 +92,25 @@ class GUIClass():
 if __name__ == "__main__":
     exit_event = threading.Event()
     gui = GUIClass(exit_event)
-
     voice_rec = VoiceRecognition(exit_event)
+    llama = Llama(exit_event)
 
     gui.register_subscriber("voice-exit", voice_rec.voice_exit_handler)
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
+    gui.register_subscriber("llama-exit", llama.llama_exit_handler)
 
+    voice_rec.register_subscriber("llama-add-prompt", llama.add_prompt_handler)
+    
     voice_rec_thread: threading.Thread = threading.Thread(
         target=voice_rec.start_voice_input
     )
+    llama_thread: threading.Thread = threading.Thread(
+        target=llama.start_conversation
+    )
+    
     voice_rec_thread.start()
+    llama_thread.start()
     gui.render()
 
     voice_rec_thread.join()
+    llama_thread.join()
