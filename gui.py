@@ -1,10 +1,214 @@
+import copy
+import time
 import cv2
 import numpy as np
 import threading
-from typing import Callable
+import math
+from typing import Callable, List, Mapping, Optional, Tuple, Union
 from voice_recognition import VoiceRecognition
 from llama_module import Llama, NUMBER_OF_OPTIONS
-from functools import partial
+import mediapipe as mp
+from mediapipe import solutions
+from mediapipe.framework.formats import landmark_pb2
+import textwrap
+from kbd_input import KeyboardInput
+import pyttsx3
+
+engine = pyttsx3.init()
+
+BaseOptions = mp.tasks.BaseOptions
+HandLandmarker = mp.tasks.vision.HandLandmarker
+HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
+HandLandmarkerResult = mp.tasks.vision.HandLandmarkerResult
+VisionRunningMode = mp.tasks.vision.RunningMode
+
+MARGIN = 10  # pixels
+FONT_SIZE = 1
+FONT_THICKNESS = 1
+HANDEDNESS_TEXT_COLOR = (88, 205, 54)  # vibrant green
+
+class VoiceRecTextComponent():
+    def __init__(self,
+                 text: str,
+                 bot_left: Tuple[int, int]):
+        self.text = text
+        self.bot_left = bot_left
+
+    def render_component(self, canvas):
+        cv2.putText(canvas, self.text, self.bot_left, cv2.FONT_HERSHEY_SIMPLEX, 0.75,
+                (0, 0, 255),
+                1,
+                cv2.LINE_AA)
+
+class OptionComponent():
+    def __init__(self,
+                 text: str,
+                 line_width: int,
+                 bot_left: Tuple[int, int],
+                 progress_100_callback: Callable,
+                 progress_speed=1):
+        """
+        bot_left means the bottom left of where the intended string is
+        supposed to go, which is the first line of the wrapped string
+        """
+        self.text = text
+        self.text_list = textwrap.wrap(text, line_width)
+        self.line_width = line_width
+        self.thickness = 1
+        self.bot_left_list = []
+
+        self.text_width = 0
+        self.text_height = 0
+        self.line_heights = []
+        self.event_subscribers: dict[str, dict[str, Callable]] = dict()
+
+        for i in range(len(self.text_list)):
+            (width, height), baseline = cv2.getTextSize(
+                self.text_list[i],
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.75,
+                2
+            )
+            self.text_width = max(width, self.text_width)
+            self.text_height += height + baseline
+            self.line_heights.append(height + baseline)
+            if i == 0:
+                self.bot_left_list.append(bot_left)
+            else:
+                self.bot_left_list.append((
+                    self.bot_left_list[i - 1][0],
+                    self.bot_left_list[i-1][1] + height + baseline
+                ))
+        self.top_left = (bot_left[0], bot_left[1] - self.line_heights[0])
+        self.bot_right = (self.top_left[0] + self.text_width,
+                          self.top_left[1] + self.text_height)
+        self.progress_speed = progress_speed
+        self.selection_progress = 0
+
+        # if is_selected == False then we decrease progress by
+        # progress_speed until it reaches 0
+        # if is_selected == True then we continously increase progress
+        # by progress_speed since original_selection_time, until it hits 100
+        self.is_selected = False
+        self.original_selection_time = 0
+
+        self.register_event_subscriber("progress_100", "gui", progress_100_callback)
+
+    def render_component(self, canvas):
+        if self.is_selected:
+            self.bold()
+        else:
+            self.unbold()
+        for i in range(len(self.text_list)):
+            cv2.putText(
+                canvas,
+                self.text_list[i],
+                self.bot_left_list[i],
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.75,
+                (0, 0, 255),
+                self.thickness,
+                cv2.LINE_AA)
+        # cv2.rectangle(canvas, self.top_left, self.bot_right, (0, 0, 0), thickness = 1)
+        cv2.line(canvas, self.top_left, (round(canvas.shape[1] * self.selection_progress / 100), self.top_left[1]), (0, 255, 0), thickness = 3)
+        cv2.line(canvas, (self.top_left[0], self.bot_right[1] + 5), (round(canvas.shape[1] * self.selection_progress / 100), self.bot_right[1] + 5), (0, 255, 0), thickness = 3)
+
+    def register_event_subscriber(self, event_name: str, subscriber_name: str, fn: Callable):
+        if event_name not in self.event_subscribers:
+            self.event_subscribers[event_name] = dict()
+        self.event_subscribers[event_name][subscriber_name] = fn
+
+    def notify_event_subscriber(self, event_name: str, subsciber_name: str, *args):
+        self.event_subscribers[event_name][subsciber_name](*args)
+    
+    def update_progress(self):
+        """
+        if self.is_selected == False, then we decrease selection_progess
+        else we increase selection_progress
+        """
+        if not self.is_selected:
+            self.selection_progress = max(0,
+                                          self.selection_progress - 2 * self.progress_speed)
+        else:
+            self.selection_progress = min(100,
+                                          self.selection_progress + self.progress_speed)
+        if self.selection_progress == 100:
+            event_name = "progress_100"
+            if event_name in self.event_subscribers:
+                for sub in self.event_subscribers[event_name].keys():
+                    self.notify_event_subscriber(event_name, sub)
+
+    def bold(self):
+        self.thickness = 2
+
+    def unbold(self):
+        self.thickness = 1
+
+
+def _normalized_to_pixel_coordinates(normalized_x: float,
+                                     normalized_y: float,
+                                     image_width: int,
+                                     image_height: int) -> Union[None, Tuple[int, int]]:
+    """Converts normalized value pair to pixel coordinates."""
+
+    # Checks if the float value is between 0 and 1.
+    def is_valid_normalized_value(value: float) -> bool:
+        return (value > 0 or math.isclose(0, value)) and (value < 1 or
+                                                      math.isclose(1, value))
+
+    if not (is_valid_normalized_value(normalized_x) and
+            is_valid_normalized_value(normalized_y)):
+        # TODO: Draw coordinates even if it's outside of the image bounds.
+        return None
+    x_px = min(math.floor(normalized_x * image_width), image_width - 1)
+    y_px = min(math.floor(normalized_y * image_height), image_height - 1)
+    return x_px, y_px
+
+
+def hand_highest_point(detection_result, image_cols, image_rows):
+    highest_pixel_pos = 100000
+    hand_landmarks_list = detection_result.hand_landmarks
+
+    for idx in range(len(hand_landmarks_list)):
+        hand_landmarks = hand_landmarks_list[idx]
+        hand_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
+        hand_landmarks_proto.landmark.extend([
+            landmark_pb2.NormalizedLandmark(x=landmark.x, y=landmark.y, z=landmark.z) for landmark in hand_landmarks
+        ])
+
+        landmark_px_list = [_normalized_to_pixel_coordinates(landmark.x, landmark.y,image_cols, image_rows) for landmark in hand_landmarks_proto.landmark]
+        for px in landmark_px_list:
+            if px is not None:
+                w, h = px
+                highest_pixel_pos = min(highest_pixel_pos, h)
+    if highest_pixel_pos == 100000:
+        return None
+    return highest_pixel_pos
+
+
+def draw_landmarks_on_image(rgb_image, detection_result):
+    hand_landmarks_list = detection_result.hand_landmarks
+    handedness_list = detection_result.handedness
+
+    # Loop through the detected hands to visualize.
+    for idx in range(len(hand_landmarks_list)):
+        hand_landmarks = hand_landmarks_list[idx]
+
+        # Draw the hand landmarks.
+        hand_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
+        hand_landmarks_proto.landmark.extend([
+            landmark_pb2.NormalizedLandmark(x=landmark.x, y=landmark.y, z=landmark.z) for landmark in hand_landmarks
+        ])
+        solutions.drawing_utils.draw_landmarks(
+            rgb_image,
+            hand_landmarks_proto,
+            solutions.hands.HAND_CONNECTIONS,
+            solutions.drawing_styles.get_default_hand_landmarks_style(),
+            solutions.drawing_styles.get_default_hand_connections_style())
+        # Get the top left corner of the detected hand's bounding box.
+        hand_high = hand_highest_point(detection_result, rgb_image.shape[1], rgb_image.shape[0])
+
+        cv2.line(rgb_image, (0, hand_high), (500, hand_high), (0, 0, 255), thickness = 2)
 
 
 class GUIClass():
@@ -15,7 +219,7 @@ class GUIClass():
     onto the frame recieved by the camera.
 
     """
-    def __init__(self, exit_event: threading.Event):
+    def __init__(self, exit_event: threading.Event, use_mediapipe=True):
 
         # list of the subscribers (str) along with their methods.
         # when an event of interest occurs, the gui object will
@@ -48,15 +252,26 @@ class GUIClass():
         # what the current state is
 
         # variables for llm rendering
-        self.llm_options: list[str] = []
+        self.llm_options: list[OptionComponent] = []
         self.selected_llm_option_index = 0
         self.number_of_llm_options = NUMBER_OF_OPTIONS
+
+
+        self.use_mediapipe = use_mediapipe
+        if self.use_mediapipe:
+            self.add_ui_component("mediapipe", lambda: None)
+        self.options = HandLandmarkerOptions(
+            base_options=BaseOptions(model_asset_path='hand_landmarker.task'),
+            running_mode=VisionRunningMode.LIVE_STREAM,
+            result_callback=self.mediapipe_callback_handler)
+
+        self.voice_rec_text_component: VoiceRecTextComponent = VoiceRecTextComponent("", (0, 0))
 
     def register_subscriber(self, subscriber_name: str, fn: Callable):
         self.subscribers[subscriber_name] = fn
 
     def notify_subscriber(self, subsciber_name: str, *args):
-        self.subscribers[subsciber_name](*args) 
+        self.subscribers[subsciber_name](*args)
 
     def add_ui_component(self,
                          component_name: str,
@@ -99,44 +314,66 @@ class GUIClass():
                 self.notify_subscriber(
                     "llama-add-prompt",
                     "ui",
-                    self.llm_options[self.selected_llm_option_index]
+                    self.llm_options[self.selected_llm_option_index].text
                 )
+                engine.say(self.llm_options[self.selected_llm_option_index].text)
+                engine.runAndWait()
                 self.render_ready["llm-options"] = False
 
     def render(self):
         cam = cv2.VideoCapture(0)
         self.frame_width = int(cam.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(cam.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        with HandLandmarker.create_from_options(self.options) as landmarker:
+            while True:
+                ret, self.canvas = cam.read()
+                if not ret:
+                    print("can't parse frame")
+                    break
+                if self.use_mediapipe:
+                    mp_input = mp.Image(
+                        image_format=mp.ImageFormat.SRGB,
+                        data=self.canvas
+                    )
+                    landmarker.detect_async(
+                        mp_input,
+                        time.time_ns() // 1_000_000
+                    )
+                self.update_canvas()
+                self.handle_input()
+                cv2.namedWindow("realtime llm", cv2.WINDOW_GUI_EXPANDED) 
+                cv2.imshow("realtime llm", self.canvas)
 
-        while True:
-            ret, self.canvas = cam.read()
+                if self.exit_event.is_set():
+                    break
 
-            if not ret:
-                print("can't parse frame")
-                break
+    def mediapipe_callback_handler(self, result, output_image, timestamp_ms):
+        self.render_functions["mediapipe"] = lambda: draw_landmarks_on_image(
+            self.canvas,
+            result)
+        self.render_ready["mediapipe"] = True
+        self.update_selected_option_mp(highest_point=hand_highest_point(result, self.canvas.shape[1], self.canvas.shape[0]))
 
-            self.update_canvas()
-            self.handle_input()
-
-            cv2.imshow("realtime llm", self.canvas)
-
-            if self.exit_event.is_set():
-                break
+    def update_selected_option_mp(self, highest_point):
+        i = 0
+        if highest_point is None:
+            return
+        for option in self.llm_options:
+            top_left, bot_right = option.top_left, option.bot_right
+            if highest_point >= top_left[1] and highest_point <= bot_right[1]:
+                self.selected_llm_option_index = i
+                return
+            i += 1
 
     def render_llm_options(self):
         for i in range(len(self.llm_options)):
-            # print(self.llm_options[i])
-            thickness = 1 
             if i == self.selected_llm_option_index:
-                thickness = 2
-            cv2.putText(
-                self.canvas,
-                self.llm_options[i],
-                (0, 50 + 30 * i),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (0, 0, 255),
-                thickness, cv2.LINE_AA)
+                self.llm_options[i].is_selected = True
+            else:
+                self.llm_options[i].is_selected = False
+
+            self.llm_options[i].update_progress()
+            self.llm_options[i].render_component(self.canvas)
 
     def llama_response_handler(self, response: str):
         # ui_component_name = "llm-options"
@@ -145,24 +382,74 @@ class GUIClass():
         # def render_options():
         # self.render_functions[ui_component_name]
         print("response recieved by gui thread")
-        self.llm_options = [rep for rep in response.splitlines() if len(rep) > 2 and rep[0].isdigit()]
+
+        line_width = 50
+        llm_options = [rep for rep in response.splitlines() if len(rep) > 2 and rep[0].isdigit()]
+        self.llm_options.clear()
+        for i in range(len(llm_options)):
+            if i == 0:
+                text_bottom_left = (0, 50 + 100 * i)
+            else:
+                text_bottom_left = (
+                    self.llm_options[i - 1].bot_left_list[-1][0],
+                    self.llm_options[i - 1].bot_left_list[-1][1] + 2 * self.llm_options[i - 1].line_heights[-1])
+            self.llm_options.append(
+                OptionComponent(
+                    llm_options[i],
+                    line_width,
+                    text_bottom_left, self.progress_full_handler))
+
         print("responses are: ", self.llm_options)
         self.render_functions["llm-options"] = lambda: self.render_llm_options()
         self.render_ready["llm-options"] = True
 
+        self.render_ready["voice_rec_text"] = False
+
+
+    def progress_full_handler(self):
+        if self.render_ready['llm-options']:
+            self.notify_subscriber(
+                "llama-add-prompt",
+                "ui",
+                self.llm_options[self.selected_llm_option_index].text
+            )
+            engine.say(self.llm_options[self.selected_llm_option_index].text)
+            engine.runAndWait()
+            self.render_ready["llm-options"] = False
+
+    def voice_input_ready_handler(self, text: str):
+        print("__________________________________")
+        self.render_ready["voice_rec_text"] = True
+        self.voice_rec_text_component = VoiceRecTextComponent(text, (100, 100))
+        self.render_functions["voice_rec_text"] = lambda : self.voice_rec_text_component.render_component(self.canvas)
+
 
 if __name__ == "__main__":
     exit_event: threading.Event = threading.Event()
-    gui: GUIClass = GUIClass(exit_event)
+    gui: GUIClass = GUIClass(exit_event, True)
     voice_rec: VoiceRecognition = VoiceRecognition(exit_event)
+    keyboard_input = KeyboardInput(exit_event)
     llama: Llama = Llama(exit_event)
 
     gui.register_subscriber("voice-exit", voice_rec.voice_exit_handler)
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
     gui.register_subscriber("llama-exit", llama.llama_exit_handler)
     gui.register_subscriber("llama-add-prompt", llama.add_prompt_handler)
+    gui.register_subscriber("kbd-exit", keyboard_input.kbd_exit)
 
-    voice_rec.register_subscriber("llama-add-prompt", llama.add_prompt_handler)
+    voice_rec.register_event_subscriber("voice_input_ready",
+                                        "llama",
+                                        llama.voice_rec_input_handler)
+    voice_rec.register_event_subscriber("voice_input_ready",
+                                        "kbd_input",
+                                        keyboard_input.voice_input_ready_handler)
+    voice_rec.register_event_subscriber("voice_input_ready",
+                                        "gui",
+                                        gui.voice_input_ready_handler)
+    
+    keyboard_input.register_event_subscriber("keyboard_input_ready",
+                                             "llama",
+                                             llama.keyboard_input_handler)
 
     llama.register_subscriber(
         "gui-recieve-llama-response",
@@ -170,6 +457,7 @@ if __name__ == "__main__":
     )
 
     gui.add_ui_component("llm-options", lambda x: x,)
+    gui.add_ui_component("voice_rec_text", lambda x: x)
 
     voice_rec_thread: threading.Thread = threading.Thread(
         target=voice_rec.start_voice_input
@@ -177,10 +465,16 @@ if __name__ == "__main__":
     llama_thread: threading.Thread = threading.Thread(
         target=llama.start_conversation
     )
+    keyboard_input_thread: threading.Thread = threading.Thread(
+        target=keyboard_input.start_input
+    )
 
     voice_rec_thread.start()
     llama_thread.start()
+    keyboard_input_thread.start()
     gui.render()
 
+    
     voice_rec_thread.join()
     llama_thread.join()
+    keyboard_input_thread.join()

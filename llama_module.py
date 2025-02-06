@@ -5,12 +5,16 @@ from ollama import chat
 
 NUMBER_OF_OPTIONS = 3
 
-voice_rec_prompt = "Generate a short 1 sentence sad response, a short 1 sentence neutral response, a short 1 sentence happy response to the" \
-    "following for me to choose in numbered format, each on its own line(example 1. sad:, 2. neutral, 3. happy ): "
 
-ui_prompt = "This is my response, don't response, just remember what I said: "
+def generate_user_prompt(voice_rec_input: str, kbd_input: str):
+    return f"This is what person A said: \"{voice_rec_input}\"." \
+        f"Can you generate 3 very short 1 sentence responses that is based on these keywords: {kbd_input}. " \
+        "Each response should be on numbered and on its own line"\
+        "(example: 1., 2. , 3.)"
 
-# prompt = ""
+
+ui_prompt = "I choose this response, don't response, just remember what I said:"
+
 
 class Llama():
     def __init__(self, exit_event: threading.Event):
@@ -19,6 +23,8 @@ class Llama():
 
         # the voice recognition thread will put the text
         # into this queue via the add_prompt_handler
+        self.voice_rec_q: queue.Queue = queue.Queue()
+
         self.prompt_q: queue.Queue = queue.Queue()
 
         # llm thread should sleep (wait) until the voice rec
@@ -39,10 +45,26 @@ class Llama():
         with self.need_response_cond:
             self.need_response_cond.notify()
 
+    def keyboard_input_handler(self, kbd_input: str):
+        """
+        the event is "keyboard_input", the keyboard thread calls this method
+        once the user has inputted something. The assumption is that the
+        voice rec thread has already added the user voice to self.voice_rec_q
+        before this method is called, so after the keyboard input, the llama
+        thread has all it needs to generate a response so it needs to wake up
+        """
+        voice_rec_input = self.voice_rec_q.get_nowait()
+        self.add_prompt_handler(
+            "user", generate_user_prompt(voice_rec_input, kbd_input))
+
+    def voice_rec_input_handler(self, voice_rec_input: str):
+        print("voice_rec_input is", voice_rec_input)
+        self.voice_rec_q.put_nowait(voice_rec_input)
+
     def add_prompt_handler(self, sender: str, new_prompt: str):
         self.prompt_q.put_nowait(
             (sender,
-             (ui_prompt if sender == "ui" else voice_rec_prompt) + new_prompt))
+             (ui_prompt + new_prompt if sender == "ui" else new_prompt)))
         self.need_response = True
         with self.need_response_cond:
             self.need_response_cond.notify()
@@ -67,7 +89,7 @@ class Llama():
                     # if gui is sending then response will be given to tts
                     # if voice_rec is sending then response will be given
                     # to gui to display
-
+                    print("prompt is", new_prompt)
                     new_message = {
                         'role': 'user',
                         'content': new_prompt,
@@ -90,8 +112,7 @@ class Llama():
                         # if tts is done then this will call the registered voice rec call back
                         # to request user voice input
                         pass
-                    elif sender == "voice_rec":
-                        
+                    elif sender == "user":
                         self.notify_subscriber(
                             "gui-recieve-llama-response",
                             response_content
