@@ -28,8 +28,8 @@ class KeyboardInput():
             self.need_response_cond.notify()
             
     def voice_input_ready_handler(self):
-        self.need_response = True
         with self.need_response_cond:
+            self.need_response = True
             self.need_response_cond.notify()
 
     def start_input(self):

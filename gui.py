@@ -1,3 +1,6 @@
+from datetime import datetime
+import os, shutil
+import argparse
 import copy
 import time
 import cv2
@@ -13,8 +16,10 @@ from mediapipe.framework.formats import landmark_pb2
 import textwrap
 from kbd_input import KeyboardInput
 import pyttsx3
+from video_recorder import VideoRecorder
+from tts import TTS
 
-engine = pyttsx3.init()
+# engine = pyttsx3.init()      
 
 BaseOptions = mp.tasks.BaseOptions
 HandLandmarker = mp.tasks.vision.HandLandmarker
@@ -26,6 +31,22 @@ MARGIN = 10  # pixels
 FONT_SIZE = 1
 FONT_THICKNESS = 1
 HANDEDNESS_TEXT_COLOR = (88, 205, 54)  # vibrant green
+
+
+def delete_contents_folder(folder: str):
+    """
+    deletes all the files in a folder
+    """
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print('Failed to delete %s. Reason: %s' % (file_path, e))
+
 
 class VoiceRecTextComponent():
     def __init__(self,
@@ -66,7 +87,7 @@ class OptionComponent():
             (width, height), baseline = cv2.getTextSize(
                 self.text_list[i],
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.75,
+                1,
                 2
             )
             self.text_width = max(width, self.text_width)
@@ -105,8 +126,8 @@ class OptionComponent():
                 self.text_list[i],
                 self.bot_left_list[i],
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.75,
-                (0, 0, 255),
+                1,
+                (0, 255, 0),
                 self.thickness,
                 cv2.LINE_AA)
         # cv2.rectangle(canvas, self.top_left, self.bot_right, (0, 0, 0), thickness = 1)
@@ -310,20 +331,27 @@ class GUIClass():
             if self.render_ready['llm-options']:
                 self.selected_llm_option_index = (self.selected_llm_option_index - 1) % self.number_of_llm_options
         elif pressed_key == 13:  # enter key
-            if self.render_ready['llm-options']:
-                self.notify_subscriber(
-                    "llama-add-prompt",
-                    "ui",
-                    self.llm_options[self.selected_llm_option_index].text
-                )
-                engine.say(self.llm_options[self.selected_llm_option_index].text)
-                engine.runAndWait()
-                self.render_ready["llm-options"] = False
+            # this is deprecated code before the hand tracking to choose is implemented
+            # if self.render_ready['llm-options']:
+            #     self.notify_subscriber(
+            #         "llama-add-prompt",
+            #         "ui",
+            #         self.llm_options[self.selected_llm_option_index].text
+            #     )
+            #     engine.say(copy.deepcopy(self.llm_options[self.selected_llm_option_index].text))
+            #     engine.runAndWait()
+            #     self.render_ready["llm-options"] = False
+            pass
 
     def render(self):
-        cam = cv2.VideoCapture(0)
+        cam = cv2.VideoCapture(4)
+        cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cam.set(cv2.CAP_PROP_FPS, 30.0)
+        cam.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         self.frame_width = int(cam.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(cam.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        print(self.frame_width)
         with HandLandmarker.create_from_options(self.options) as landmarker:
             while True:
                 ret, self.canvas = cam.read()
@@ -340,8 +368,11 @@ class GUIClass():
                         time.time_ns() // 1_000_000
                     )
                 self.update_canvas()
+                self.notify_subscriber("new-frame-to-record", copy.deepcopy(self.canvas))
                 self.handle_input()
-                cv2.namedWindow("realtime llm", cv2.WINDOW_GUI_EXPANDED) 
+                cv2.namedWindow("realtime llm", cv2.WND_PROP_FULLSCREEN)
+                cv2.setWindowProperty("realtime llm", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+
                 cv2.imshow("realtime llm", self.canvas)
 
                 if self.exit_event.is_set():
@@ -405,7 +436,6 @@ class GUIClass():
 
         self.render_ready["voice_rec_text"] = False
 
-
     def progress_full_handler(self):
         if self.render_ready['llm-options']:
             self.notify_subscriber(
@@ -413,29 +443,76 @@ class GUIClass():
                 "ui",
                 self.llm_options[self.selected_llm_option_index].text
             )
-            engine.say(self.llm_options[self.selected_llm_option_index].text)
-            engine.runAndWait()
+            # engine.say(copy.deepcopy(self.llm_options[self.selected_llm_option_index].text), 'text')
+            self.notify_subscriber(
+                "tts-speak-option",
+                copy.deepcopy(
+                    self.llm_options[self.selected_llm_option_index].text))
             self.render_ready["llm-options"] = False
 
     def voice_input_ready_handler(self, text: str):
         print("__________________________________")
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = VoiceRecTextComponent(text, (100, 100))
-        self.render_functions["voice_rec_text"] = lambda : self.voice_rec_text_component.render_component(self.canvas)
+        self.render_functions["voice_rec_text"] = lambda: self.voice_rec_text_component.render_component(self.canvas)
+
+    def finished_speaking_handler(self):
+        self.notify_subscriber("voice-start")
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-p",
+        "--path",
+        help="path to output the data like video, voice recording,...",
+        required=True)
+    args = parser.parse_args()
+
+    folder_path = ""
+    video_path = ""
+
+    if os.path.exists(args.path):
+        print(f"{args.path} already exists, do you want to delete the contents or no [y/n]")
+        while True:
+            delete_or_not = input()
+            if delete_or_not == "y":
+                delete_contents_folder(args.path)
+                os.mkdir(os.path.join(args.path, "video"))
+                break
+            elif delete_or_not == "n":
+                break
+            else:
+                print("please only enter y or n:")
+        
+    else:
+        os.mkdir(args.path)
+        os.mkdir(os.path.join(args.path, "video"))
+
+    folder_path = args.path
+    video_path = os.path.join(args.path, "video")
+    time_rn = datetime.now().strftime("%H_%M_%S")
+    video_filename = f"video_{time_rn}.mp4"
+
+    video_recorder = VideoRecorder(video_path, video_filename)
+    
     exit_event: threading.Event = threading.Event()
     gui: GUIClass = GUIClass(exit_event, True)
     voice_rec: VoiceRecognition = VoiceRecognition(exit_event)
     keyboard_input = KeyboardInput(exit_event)
     llama: Llama = Llama(exit_event)
+    text_to_speech = TTS(gui.finished_speaking_handler)
 
     gui.register_subscriber("voice-exit", voice_rec.voice_exit_handler)
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
     gui.register_subscriber("llama-exit", llama.llama_exit_handler)
     gui.register_subscriber("llama-add-prompt", llama.add_prompt_handler)
     gui.register_subscriber("kbd-exit", keyboard_input.kbd_exit)
+    gui.register_subscriber("new-frame-to-record", video_recorder.new_frame_event_handler)
+    gui.register_subscriber("video-record-exit", video_recorder.exit_event_handler)
+    gui.register_subscriber("tts-speak-option", text_to_speech.add_tts_handler)
+    gui.register_subscriber("tts-exit", text_to_speech.exit_handler)
+    
 
     voice_rec.register_event_subscriber("voice_input_ready",
                                         "llama",
@@ -468,13 +545,23 @@ if __name__ == "__main__":
     keyboard_input_thread: threading.Thread = threading.Thread(
         target=keyboard_input.start_input
     )
+    video_recorder_thread: threading.Thread = threading.Thread(
+        target=video_recorder.write_video
+    )
+
+    tts_thread: threading.Thread = threading.Thread(
+        target=text_to_speech.start_tts
+    )
 
     voice_rec_thread.start()
     llama_thread.start()
     keyboard_input_thread.start()
+    video_recorder_thread.start()
+    tts_thread.start()
     gui.render()
 
-    
     voice_rec_thread.join()
     llama_thread.join()
     keyboard_input_thread.join()
+    video_recorder_thread.join()
+    tts_thread.join()

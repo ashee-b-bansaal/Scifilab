@@ -65,8 +65,8 @@ class Llama():
         self.prompt_q.put_nowait(
             (sender,
              (ui_prompt + new_prompt if sender == "ui" else new_prompt)))
-        self.need_response = True
         with self.need_response_cond:
+            self.need_response = True
             self.need_response_cond.notify()
 
     def start_conversation(self):
