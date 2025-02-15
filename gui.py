@@ -54,12 +54,27 @@ class VoiceRecTextComponent():
                  bot_left: Tuple[int, int]):
         self.text = text
         self.bot_left = bot_left
-
+        self.text_list = self.wrap_text(text)  # Wrap the text into chunks of 5 words
+        
+    def wrap_text(self, text: str, max_words_per_line: int = 5) -> list:
+        """
+        Wrap text into chunks with no more than `max_words_per_line` words per chunk.
+        """
+        words = text.split()
+        wrapped_text = []
+        
+        for i in range(0, len(words), max_words_per_line):
+            wrapped_text.append(" ".join(words[i:i + max_words_per_line]))
+        
+        return wrapped_text
+    
     def render_component(self, canvas):
-        cv2.putText(canvas, self.text, self.bot_left, cv2.FONT_HERSHEY_SIMPLEX, 0.75,
-                (0, 0, 255),
-                1,
-                cv2.LINE_AA)
+        y_offset = 0
+        for line in self.text_list:
+            cv2.putText(canvas, line, (self.bot_left[0], self.bot_left[1] + y_offset),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 0, 255), 1, cv2.LINE_AA)
+            y_offset += 30  
+
 
 class OptionComponent():
     def __init__(self,
@@ -73,7 +88,7 @@ class OptionComponent():
         supposed to go, which is the first line of the wrapped string
         """
         self.text = text
-        self.text_list = textwrap.wrap(text, line_width)
+        self.text_list = textwrap.wrap(text, line_width - 14)
         self.line_width = line_width
         self.thickness = 1
         self.bot_left_list = []
@@ -82,6 +97,7 @@ class OptionComponent():
         self.text_height = 0
         self.line_heights = []
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()
+        self.color = (0, 255, 0)
 
         for i in range(len(self.text_list)):
             (width, height), baseline = cv2.getTextSize(
@@ -127,12 +143,34 @@ class OptionComponent():
                 self.bot_left_list[i],
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
-                (0, 255, 0),
+                self.color,
                 self.thickness,
                 cv2.LINE_AA)
-        # cv2.rectangle(canvas, self.top_left, self.bot_right, (0, 0, 0), thickness = 1)
-        cv2.line(canvas, self.top_left, (round(canvas.shape[1] * self.selection_progress / 100), self.top_left[1]), (0, 255, 0), thickness = 3)
-        cv2.line(canvas, (self.top_left[0], self.bot_right[1] + 5), (round(canvas.shape[1] * self.selection_progress / 100), self.bot_right[1] + 5), (0, 255, 0), thickness = 3)
+        
+        self.selection_progress = min(max(self.selection_progress, 0), 100)
+
+        line_width = round(canvas.shape[1] * self.selection_progress / 100)
+        line_width = max(line_width, 1)  
+
+        start_position = self.top_left[0] 
+        end_position = start_position + line_width
+        end_position = min(end_position, canvas.shape[1])
+
+        cv2.line(
+            canvas,
+            (start_position, self.top_left[1]),  
+            (end_position, self.top_left[1]),    # End at the calculated right position
+            self.color,
+            thickness=3
+        )
+
+        cv2.line(
+            canvas,
+            (start_position, self.bot_right[1] + 5),  # Start at the calculated bottom left
+            (end_position, self.bot_right[1] + 5),    # End at the calculated bottom right
+            self.color,
+            thickness=3
+        )
 
     def register_event_subscriber(self, event_name: str, subscriber_name: str, fn: Callable):
         if event_name not in self.event_subscribers:
@@ -228,8 +266,8 @@ def draw_landmarks_on_image(rgb_image, detection_result):
             solutions.drawing_styles.get_default_hand_connections_style())
         # Get the top left corner of the detected hand's bounding box.
         hand_high = hand_highest_point(detection_result, rgb_image.shape[1], rgb_image.shape[0])
-
-        cv2.line(rgb_image, (0, hand_high), (500, hand_high), (0, 0, 255), thickness = 2)
+        
+        cv2.line(rgb_image, (700, hand_high), (1300, hand_high), (0, 0, 255), thickness = 2)
 
 
 class GUIClass():
@@ -344,7 +382,7 @@ class GUIClass():
             pass
 
     def render(self):
-        cam = cv2.VideoCapture(4)
+        cam = cv2.VideoCapture(0)
         cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cam.set(cv2.CAP_PROP_FPS, 30.0)
@@ -378,6 +416,7 @@ class GUIClass():
                 if self.exit_event.is_set():
                     break
 
+    
     def mediapipe_callback_handler(self, result, output_image, timestamp_ms):
         self.render_functions["mediapipe"] = lambda: draw_landmarks_on_image(
             self.canvas,
@@ -400,8 +439,10 @@ class GUIClass():
         for i in range(len(self.llm_options)):
             if i == self.selected_llm_option_index:
                 self.llm_options[i].is_selected = True
+                self.llm_options[i].color = (0,0,255)
             else:
                 self.llm_options[i].is_selected = False
+                self.llm_options[i].color = (0,255,0)
 
             self.llm_options[i].update_progress()
             self.llm_options[i].render_component(self.canvas)
@@ -419,7 +460,7 @@ class GUIClass():
         self.llm_options.clear()
         for i in range(len(llm_options)):
             if i == 0:
-                text_bottom_left = (0, 50 + 100 * i)
+                text_bottom_left = (self.frame_width//2 , 50 + 100 * i)
             else:
                 text_bottom_left = (
                     self.llm_options[i - 1].bot_left_list[-1][0],
@@ -453,7 +494,7 @@ class GUIClass():
     def voice_input_ready_handler(self, text: str):
         print("__________________________________")
         self.render_ready["voice_rec_text"] = True
-        self.voice_rec_text_component = VoiceRecTextComponent(text, (100, 100))
+        self.voice_rec_text_component = VoiceRecTextComponent(text, (100, 650))
         self.render_functions["voice_rec_text"] = lambda: self.voice_rec_text_component.render_component(self.canvas)
 
     def finished_speaking_handler(self):
