@@ -52,15 +52,19 @@ def delete_contents_folder(folder: str):
 class VoiceRecTextComponent():
     def __init__(self,
                  text: str,
+                 line_width: int,
                  bot_left: Tuple[int, int]):
         self.text = text
         self.bot_left = bot_left
+        self.line_width = line_width
+        self.text_list = textwrap.wrap(text, line_width)
 
     def render_component(self, canvas):
-        cv2.putText(canvas, self.text, self.bot_left, cv2.FONT_HERSHEY_SIMPLEX, 0.75,
-                    (0, 255, 0),
-                    2,
-                    cv2.LINE_AA)
+        y_offset = 0
+        for line in self.text_list:
+            cv2.putText(canvas, line, (self.bot_left[0], self.bot_left[1] + y_offset),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3, cv2.LINE_AA)
+            y_offset += 30
 
 
 class OptionComponent():
@@ -84,6 +88,7 @@ class OptionComponent():
         self.text_height = 0
         self.line_heights = []
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()
+        self.color = (0, 255, 0)
 
         for i in range(len(self.text_list)):
             (width, height), baseline = cv2.getTextSize(
@@ -130,14 +135,37 @@ class OptionComponent():
                 self.bot_left_list[i],
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
-                (0, 255, 0),
+                self.color,
                 self.thickness,
                 cv2.LINE_AA)
-        # cv2.rectangle(canvas, self.top_left, self.bot_right, (0, 0, 0), thickness = 1)
-        cv2.line(canvas, self.top_left, (round(
-            canvas.shape[1] * self.selection_progress / 100), self.top_left[1]), (0, 255, 0), thickness=3)
-        cv2.line(canvas, (self.top_left[0], self.bot_right[1] + 5), (round(canvas.shape[1]
-                 * self.selection_progress / 100), self.bot_right[1] + 5), (0, 255, 0), thickness=3)
+
+        self.selection_progress = min(max(self.selection_progress, 0), 100)
+
+        line_width = round(canvas.shape[1] * self.selection_progress / 100)
+        line_width = max(line_width, 1)
+
+        start_position = 0
+        end_position = start_position + line_width
+        end_position = min(end_position, canvas.shape[1])
+
+        cv2.line(
+            canvas,
+            (start_position, self.top_left[1]),
+            # End at the calculated right position
+            (end_position, self.top_left[1]),
+            self.color,
+            thickness=3
+        )
+
+        cv2.line(
+            canvas,
+            # Start at the calculated bottom left
+            (start_position, self.bot_right[1] + 5),
+            # End at the calculated bottom right
+            (end_position, self.bot_right[1] + 5),
+            self.color,
+            thickness=3
+        )
 
     def register_event_subscriber(self, event_name: str, subscriber_name: str, fn: Callable):
         if event_name not in self.event_subscribers:
@@ -237,7 +265,7 @@ def draw_landmarks_on_image(rgb_image, detection_result):
             detection_result, rgb_image.shape[1], rgb_image.shape[0])
 
         cv2.line(rgb_image, (0, hand_high),
-                 (500, hand_high), (0, 0, 255), thickness=2)
+                 (1300, hand_high), (0, 0, 255), thickness=2)
 
 
 class GUIClass():
@@ -249,8 +277,8 @@ class GUIClass():
 
     """
 
-    def __init__(self, exit_event: threading.Event, use_mediapipe=True):
-
+    def __init__(self, exit_event: threading.Event, use_mediapipe=True, fullscreen=False):
+        self.fullscreen = fullscreen
         # list of the subscribers (str) along with their methods.
         # when an event of interest occurs, the gui object will
         # call the corresponding method of the subscriber
@@ -295,7 +323,7 @@ class GUIClass():
             result_callback=self.mediapipe_callback_handler)
 
         self.voice_rec_text_component: VoiceRecTextComponent = VoiceRecTextComponent(
-            "", (0, 0))
+            "", 36, (0, 0))
 
     def register_subscriber(self, subscriber_name: str, fn: Callable):
         self.subscribers[subscriber_name] = fn
@@ -383,10 +411,12 @@ class GUIClass():
                 self.notify_subscriber(
                     "new-frame-to-record", copy.deepcopy(self.canvas))
                 self.handle_input()
-                cv2.namedWindow("realtime llm", cv2.WND_PROP_FULLSCREEN)
-                cv2.setWindowProperty(
-                    "realtime llm", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-
+                if self.fullscreen:
+                    cv2.namedWindow("realtime llm", cv2.WND_PROP_FULLSCREEN)
+                    cv2.setWindowProperty(
+                        "realtime llm", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+                else:
+                    cv2.namedWindow("realtime llm", cv2.WINDOW_GUI_NORMAL)
                 cv2.imshow("realtime llm", cv2.resize(
                     self.canvas, (1920, 1080), interpolation=cv2.INTER_CUBIC))
 
@@ -416,8 +446,10 @@ class GUIClass():
         for i in range(len(self.llm_options)):
             if i == self.selected_llm_option_index:
                 self.llm_options[i].is_selected = True
+                self.llm_options[i].color = (0, 0, 255)
             else:
                 self.llm_options[i].is_selected = False
+                self.llm_options[i].color = (0, 255, 0)
 
             self.llm_options[i].update_progress()
             self.llm_options[i].render_component(self.canvas)
@@ -430,13 +462,13 @@ class GUIClass():
         # self.render_functions[ui_component_name]
         print("response recieved by gui thread")
 
-        line_width = 50
+        line_width = 36
         llm_options = [rep for rep in response.splitlines() if len(
             rep) > 2 and rep[0].isdigit()]
         self.llm_options.clear()
         for i in range(len(llm_options)):
             if i == 0:
-                text_bottom_left = (0, 50 + 100 * i)
+                text_bottom_left = (self.frame_width//2, 50 + 100 * i)
             else:
                 text_bottom_left = (
                     self.llm_options[i - 1].bot_left_list[-1][0],
@@ -475,7 +507,8 @@ class GUIClass():
     def voice_input_ready_handler(self, text: str):
         print("__________________________________")
         self.render_ready["voice_rec_text"] = True
-        self.voice_rec_text_component = VoiceRecTextComponent(text, (100, 100))
+        self.voice_rec_text_component = VoiceRecTextComponent(
+            text, 36, (self.canvas.shape[1] // 2 - 100, self.canvas.shape[0] // 2 - 100))
         self.render_functions["voice_rec_text"] = lambda: self.voice_rec_text_component.render_component(
             self.canvas)
 
@@ -490,6 +523,12 @@ if __name__ == "__main__":
         "--path",
         help="path to output the data like video, voice recording,...",
         required=True)
+    parser.add_argument(
+        "-fs",
+        "--fullscreen",
+        help="whether to display the gui in fullscreen",
+        action='store_true')
+
     args = parser.parse_args()
 
     folder_path = ""
@@ -521,7 +560,8 @@ if __name__ == "__main__":
     video_recorder = VideoRecorder(video_path, video_filename)
 
     exit_event: threading.Event = threading.Event()
-    gui: GUIClass = GUIClass(exit_event, True)
+    gui: GUIClass = GUIClass(exit_event=exit_event,
+                             use_mediapipe=True, fullscreen=args.fullscreen)
     voice_rec: VoiceRecognition = VoiceRecognition(exit_event)
     keyboard_input = KeyboardInput(exit_event)
     llama: Llama = Llama(exit_event)
