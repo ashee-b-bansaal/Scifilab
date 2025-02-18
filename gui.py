@@ -1,5 +1,6 @@
 from datetime import datetime
-import os, shutil
+import os
+import shutil
 import argparse
 import copy
 import time
@@ -19,7 +20,7 @@ import pyttsx3
 from video_recorder import VideoRecorder
 from tts import TTS
 
-# engine = pyttsx3.init()      
+engine = pyttsx3.init()
 
 BaseOptions = mp.tasks.BaseOptions
 HandLandmarker = mp.tasks.vision.HandLandmarker
@@ -57,9 +58,10 @@ class VoiceRecTextComponent():
 
     def render_component(self, canvas):
         cv2.putText(canvas, self.text, self.bot_left, cv2.FONT_HERSHEY_SIMPLEX, 0.75,
-                (0, 0, 255),
-                1,
-                cv2.LINE_AA)
+                    (0, 255, 0),
+                    2,
+                    cv2.LINE_AA)
+
 
 class OptionComponent():
     def __init__(self,
@@ -113,7 +115,8 @@ class OptionComponent():
         self.is_selected = False
         self.original_selection_time = 0
 
-        self.register_event_subscriber("progress_100", "gui", progress_100_callback)
+        self.register_event_subscriber(
+            "progress_100", "gui", progress_100_callback)
 
     def render_component(self, canvas):
         if self.is_selected:
@@ -131,8 +134,10 @@ class OptionComponent():
                 self.thickness,
                 cv2.LINE_AA)
         # cv2.rectangle(canvas, self.top_left, self.bot_right, (0, 0, 0), thickness = 1)
-        cv2.line(canvas, self.top_left, (round(canvas.shape[1] * self.selection_progress / 100), self.top_left[1]), (0, 255, 0), thickness = 3)
-        cv2.line(canvas, (self.top_left[0], self.bot_right[1] + 5), (round(canvas.shape[1] * self.selection_progress / 100), self.bot_right[1] + 5), (0, 255, 0), thickness = 3)
+        cv2.line(canvas, self.top_left, (round(
+            canvas.shape[1] * self.selection_progress / 100), self.top_left[1]), (0, 255, 0), thickness=3)
+        cv2.line(canvas, (self.top_left[0], self.bot_right[1] + 5), (round(canvas.shape[1]
+                 * self.selection_progress / 100), self.bot_right[1] + 5), (0, 255, 0), thickness=3)
 
     def register_event_subscriber(self, event_name: str, subscriber_name: str, fn: Callable):
         if event_name not in self.event_subscribers:
@@ -141,7 +146,7 @@ class OptionComponent():
 
     def notify_event_subscriber(self, event_name: str, subsciber_name: str, *args):
         self.event_subscribers[event_name][subsciber_name](*args)
-    
+
     def update_progress(self):
         """
         if self.is_selected == False, then we decrease selection_progess
@@ -175,7 +180,7 @@ def _normalized_to_pixel_coordinates(normalized_x: float,
     # Checks if the float value is between 0 and 1.
     def is_valid_normalized_value(value: float) -> bool:
         return (value > 0 or math.isclose(0, value)) and (value < 1 or
-                                                      math.isclose(1, value))
+                                                          math.isclose(1, value))
 
     if not (is_valid_normalized_value(normalized_x) and
             is_valid_normalized_value(normalized_y)):
@@ -197,7 +202,8 @@ def hand_highest_point(detection_result, image_cols, image_rows):
             landmark_pb2.NormalizedLandmark(x=landmark.x, y=landmark.y, z=landmark.z) for landmark in hand_landmarks
         ])
 
-        landmark_px_list = [_normalized_to_pixel_coordinates(landmark.x, landmark.y,image_cols, image_rows) for landmark in hand_landmarks_proto.landmark]
+        landmark_px_list = [_normalized_to_pixel_coordinates(
+            landmark.x, landmark.y, image_cols, image_rows) for landmark in hand_landmarks_proto.landmark]
         for px in landmark_px_list:
             if px is not None:
                 w, h = px
@@ -227,9 +233,11 @@ def draw_landmarks_on_image(rgb_image, detection_result):
             solutions.drawing_styles.get_default_hand_landmarks_style(),
             solutions.drawing_styles.get_default_hand_connections_style())
         # Get the top left corner of the detected hand's bounding box.
-        hand_high = hand_highest_point(detection_result, rgb_image.shape[1], rgb_image.shape[0])
+        hand_high = hand_highest_point(
+            detection_result, rgb_image.shape[1], rgb_image.shape[0])
 
-        cv2.line(rgb_image, (0, hand_high), (500, hand_high), (0, 0, 255), thickness = 2)
+        cv2.line(rgb_image, (0, hand_high),
+                 (500, hand_high), (0, 0, 255), thickness=2)
 
 
 class GUIClass():
@@ -240,6 +248,7 @@ class GUIClass():
     onto the frame recieved by the camera.
 
     """
+
     def __init__(self, exit_event: threading.Event, use_mediapipe=True):
 
         # list of the subscribers (str) along with their methods.
@@ -277,7 +286,6 @@ class GUIClass():
         self.selected_llm_option_index = 0
         self.number_of_llm_options = NUMBER_OF_OPTIONS
 
-
         self.use_mediapipe = use_mediapipe
         if self.use_mediapipe:
             self.add_ui_component("mediapipe", lambda: None)
@@ -286,7 +294,8 @@ class GUIClass():
             running_mode=VisionRunningMode.LIVE_STREAM,
             result_callback=self.mediapipe_callback_handler)
 
-        self.voice_rec_text_component: VoiceRecTextComponent = VoiceRecTextComponent("", (0, 0))
+        self.voice_rec_text_component: VoiceRecTextComponent = VoiceRecTextComponent(
+            "", (0, 0))
 
     def register_subscriber(self, subscriber_name: str, fn: Callable):
         self.subscribers[subscriber_name] = fn
@@ -313,7 +322,7 @@ class GUIClass():
         pressed_key = cv2.waitKeyEx(1) & 0xFF
         if pressed_key != 255:
             print(pressed_key)
-        
+
         if pressed_key == 27:
             self.exit_event.set()
 
@@ -321,15 +330,18 @@ class GUIClass():
             # this is letting the subsciber handle the exit
             for subscriber in list(self.subscribers.keys()):
                 if "-exit" in subscriber:
+                    print("SUBCRIBRE TRYING TO EXIT IS", subscriber)
                     self.notify_subscriber(subscriber)
         elif pressed_key == ord(' '):
             self.notify_subscriber("voice-start")
         elif pressed_key == 84:  # up arrow:
             if self.render_ready['llm-options']:
-                self.selected_llm_option_index = (self.selected_llm_option_index + 1) % self.number_of_llm_options
+                self.selected_llm_option_index = (
+                    self.selected_llm_option_index + 1) % self.number_of_llm_options
         elif pressed_key == 82:  # down arrow
             if self.render_ready['llm-options']:
-                self.selected_llm_option_index = (self.selected_llm_option_index - 1) % self.number_of_llm_options
+                self.selected_llm_option_index = (
+                    self.selected_llm_option_index - 1) % self.number_of_llm_options
         elif pressed_key == 13:  # enter key
             # this is deprecated code before the hand tracking to choose is implemented
             # if self.render_ready['llm-options']:
@@ -339,12 +351,12 @@ class GUIClass():
             #         self.llm_options[self.selected_llm_option_index].text
             #     )
             #     engine.say(copy.deepcopy(self.llm_options[self.selected_llm_option_index].text))
-            #     engine.runAndWait()
+            #     engine.runAndWait()kill
             #     self.render_ready["llm-options"] = False
             pass
 
     def render(self):
-        cam = cv2.VideoCapture(4)
+        cam = cv2.VideoCapture(0)
         cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cam.set(cv2.CAP_PROP_FPS, 30.0)
@@ -368,12 +380,15 @@ class GUIClass():
                         time.time_ns() // 1_000_000
                     )
                 self.update_canvas()
-                self.notify_subscriber("new-frame-to-record", copy.deepcopy(self.canvas))
+                self.notify_subscriber(
+                    "new-frame-to-record", copy.deepcopy(self.canvas))
                 self.handle_input()
                 cv2.namedWindow("realtime llm", cv2.WND_PROP_FULLSCREEN)
-                cv2.setWindowProperty("realtime llm", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+                cv2.setWindowProperty(
+                    "realtime llm", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
-                cv2.imshow("realtime llm", self.canvas)
+                cv2.imshow("realtime llm", cv2.resize(
+                    self.canvas, (1920, 1080), interpolation=cv2.INTER_CUBIC))
 
                 if self.exit_event.is_set():
                     break
@@ -383,7 +398,8 @@ class GUIClass():
             self.canvas,
             result)
         self.render_ready["mediapipe"] = True
-        self.update_selected_option_mp(highest_point=hand_highest_point(result, self.canvas.shape[1], self.canvas.shape[0]))
+        self.update_selected_option_mp(highest_point=hand_highest_point(
+            result, self.canvas.shape[1], self.canvas.shape[0]))
 
     def update_selected_option_mp(self, highest_point):
         i = 0
@@ -415,7 +431,8 @@ class GUIClass():
         print("response recieved by gui thread")
 
         line_width = 50
-        llm_options = [rep for rep in response.splitlines() if len(rep) > 2 and rep[0].isdigit()]
+        llm_options = [rep for rep in response.splitlines() if len(
+            rep) > 2 and rep[0].isdigit()]
         self.llm_options.clear()
         for i in range(len(llm_options)):
             if i == 0:
@@ -444,17 +461,23 @@ class GUIClass():
                 self.llm_options[self.selected_llm_option_index].text
             )
             # engine.say(copy.deepcopy(self.llm_options[self.selected_llm_option_index].text), 'text')
-            self.notify_subscriber(
-                "tts-speak-option",
-                copy.deepcopy(
-                    self.llm_options[self.selected_llm_option_index].text))
+            # self.notify_subscriber(
+            # "tts-speak-option",
+            # copy.deepcopy(
+            # self.llm_options[self.selected_llm_option_index].text))
+            print("speaking, ", copy.deepcopy(
+                self.llm_options[self.selected_llm_option_index].text))
+            engine.say(copy.deepcopy(
+                self.llm_options[self.selected_llm_option_index].text))
+            engine.runAndWait()
             self.render_ready["llm-options"] = False
 
     def voice_input_ready_handler(self, text: str):
         print("__________________________________")
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = VoiceRecTextComponent(text, (100, 100))
-        self.render_functions["voice_rec_text"] = lambda: self.voice_rec_text_component.render_component(self.canvas)
+        self.render_functions["voice_rec_text"] = lambda: self.voice_rec_text_component.render_component(
+            self.canvas)
 
     def finished_speaking_handler(self):
         self.notify_subscriber("voice-start")
@@ -473,7 +496,8 @@ if __name__ == "__main__":
     video_path = ""
 
     if os.path.exists(args.path):
-        print(f"{args.path} already exists, do you want to delete the contents or no [y/n]")
+        print(
+            f"{args.path} already exists, do you want to delete the contents or no [y/n]")
         while True:
             delete_or_not = input()
             if delete_or_not == "y":
@@ -484,7 +508,7 @@ if __name__ == "__main__":
                 break
             else:
                 print("please only enter y or n:")
-        
+
     else:
         os.mkdir(args.path)
         os.mkdir(os.path.join(args.path, "video"))
@@ -495,24 +519,22 @@ if __name__ == "__main__":
     video_filename = f"video_{time_rn}.mp4"
 
     video_recorder = VideoRecorder(video_path, video_filename)
-    
+
     exit_event: threading.Event = threading.Event()
     gui: GUIClass = GUIClass(exit_event, True)
     voice_rec: VoiceRecognition = VoiceRecognition(exit_event)
     keyboard_input = KeyboardInput(exit_event)
     llama: Llama = Llama(exit_event)
-    text_to_speech = TTS(gui.finished_speaking_handler)
 
     gui.register_subscriber("voice-exit", voice_rec.voice_exit_handler)
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
     gui.register_subscriber("llama-exit", llama.llama_exit_handler)
     gui.register_subscriber("llama-add-prompt", llama.add_prompt_handler)
     gui.register_subscriber("kbd-exit", keyboard_input.kbd_exit)
-    gui.register_subscriber("new-frame-to-record", video_recorder.new_frame_event_handler)
-    gui.register_subscriber("video-record-exit", video_recorder.exit_event_handler)
-    gui.register_subscriber("tts-speak-option", text_to_speech.add_tts_handler)
-    gui.register_subscriber("tts-exit", text_to_speech.exit_handler)
-    
+    gui.register_subscriber("new-frame-to-record",
+                            video_recorder.new_frame_event_handler)
+    gui.register_subscriber("video-record-exit",
+                            video_recorder.exit_event_handler)
 
     voice_rec.register_event_subscriber("voice_input_ready",
                                         "llama",
@@ -523,7 +545,7 @@ if __name__ == "__main__":
     voice_rec.register_event_subscriber("voice_input_ready",
                                         "gui",
                                         gui.voice_input_ready_handler)
-    
+
     keyboard_input.register_event_subscriber("keyboard_input_ready",
                                              "llama",
                                              llama.keyboard_input_handler)
@@ -549,19 +571,13 @@ if __name__ == "__main__":
         target=video_recorder.write_video
     )
 
-    tts_thread: threading.Thread = threading.Thread(
-        target=text_to_speech.start_tts
-    )
-
     voice_rec_thread.start()
     llama_thread.start()
     keyboard_input_thread.start()
     video_recorder_thread.start()
-    tts_thread.start()
     gui.render()
 
     voice_rec_thread.join()
     llama_thread.join()
     keyboard_input_thread.join()
     video_recorder_thread.join()
-    tts_thread.join()

@@ -42,7 +42,8 @@ class TTS():
                     self.engine.say(text, 'text')
                     self.engine.runAndWait()
                     self.need_tts = False
-                    self.finished_speaking_handler()
+                    # time.sleep(3)
+                    # self.finished_speaking_handler()
                     print("done speak")
             print("tts thread exited")
         except:

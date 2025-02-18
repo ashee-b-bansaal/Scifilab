@@ -34,7 +34,8 @@ class VideoRecorder():
         self.need_write_new_frame = False
 
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()
-        
+        self.need_exit = False
+
     def register_event_subscriber(self,
                                   event_name: str,
                                   subscriber_name: str, fn: Callable):
@@ -55,6 +56,7 @@ class VideoRecorder():
 
     def exit_event_handler(self):
         self.frames_q.put_nowait(None)
+        self.need_exit = True
         with self.need_write_new_frame_cond:
             self.need_write_new_frame = True
             self.need_write_new_frame_cond.notify()
@@ -67,6 +69,9 @@ class VideoRecorder():
             with self.need_write_new_frame_cond:
                 while True:
                     while not self.need_write_new_frame:
+                        if self.need_exit:
+                            self.graceful_exit()
+                            break
                         self.need_write_new_frame_cond.wait()
                     frame = self.frames_q.get_nowait()
                     if frame is None:
