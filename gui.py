@@ -10,7 +10,6 @@ import threading
 import math
 from typing import Callable, List, Mapping, Optional, Tuple, Union
 from voice_recognition import VoiceRecognition
-from llama_module import Llama, NUMBER_OF_OPTIONS
 import mediapipe as mp
 from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
@@ -18,9 +17,16 @@ import textwrap
 from kbd_input import KeyboardInput
 import pyttsx3
 from video_recorder import VideoRecorder
-from tts import TTS
+from chatgpt_api import ChatGPTAPI
+
 
 engine = pyttsx3.init()
+
+# recorder = AudioToTextRecorder(
+#     language="en",
+#     # on_recording_start=gui.on_voice_recording_start,
+#     # on_recording_stop=gui.on_voice_recording_stop
+# )
 
 BaseOptions = mp.tasks.BaseOptions
 HandLandmarker = mp.tasks.vision.HandLandmarker
@@ -312,7 +318,7 @@ class GUIClass():
         # variables for llm rendering
         self.llm_options: list[OptionComponent] = []
         self.selected_llm_option_index = 0
-        self.number_of_llm_options = NUMBER_OF_OPTIONS
+        self.number_of_llm_options = 3
 
         self.use_mediapipe = use_mediapipe
         if self.use_mediapipe:
@@ -419,7 +425,6 @@ class GUIClass():
                     cv2.namedWindow("realtime llm", cv2.WINDOW_GUI_NORMAL)
                 cv2.imshow("realtime llm", cv2.resize(
                     self.canvas, (1920, 1080), interpolation=cv2.INTER_CUBIC))
-
                 if self.exit_event.is_set():
                     break
 
@@ -454,7 +459,7 @@ class GUIClass():
             self.llm_options[i].update_progress()
             self.llm_options[i].render_component(self.canvas)
 
-    def llama_response_handler(self, response: str):
+    def llm_response_handler(self, response: str):
         # ui_component_name = "llm-options"
         # responses_list = response.splitlines()
         # responses_list = [rep for rep in responses_list if rep[0].isdigit()]
@@ -479,7 +484,6 @@ class GUIClass():
                     line_width,
                     text_bottom_left, self.progress_full_handler))
 
-        print("responses are: ", self.llm_options)
         self.render_functions["llm-options"] = lambda: self.render_llm_options()
         self.render_ready["llm-options"] = True
 
@@ -488,8 +492,8 @@ class GUIClass():
     def progress_full_handler(self):
         if self.render_ready['llm-options']:
             self.notify_subscriber(
-                "llama-add-prompt",
-                "ui",
+                "llm-add-prompt",
+                "B",
                 self.llm_options[self.selected_llm_option_index].text
             )
             # engine.say(copy.deepcopy(self.llm_options[self.selected_llm_option_index].text), 'text')
@@ -505,15 +509,33 @@ class GUIClass():
             self.render_ready["llm-options"] = False
 
     def voice_input_ready_handler(self, text: str):
-        print("__________________________________")
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = VoiceRecTextComponent(
             text, 36, (self.canvas.shape[1] // 2 - 100, self.canvas.shape[0] // 2 - 100))
         self.render_functions["voice_rec_text"] = lambda: self.voice_rec_text_component.render_component(
             self.canvas)
 
-    def finished_speaking_handler(self):
-        self.notify_subscriber("voice-start")
+    def on_voice_recording_start(self):
+        """
+        Shows Recording Voice on screen to indicate that the hearing person's voice has been
+        picked up
+        """
+        self.render_ready["voice-recording-start"] = True
+        self.render_functions["voice-recording-start"] = lambda: cv2.putText(
+            self.canvas,
+            "Recording Voice",
+            (100, 100),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (255, 0, 0),
+            2,
+            cv2.LINE_AA)
+
+    def on_voice_recording_stop(self):
+        """
+        removes the Recording Voice text on screen
+        """
+        self.render_ready["voice-recording-start"] = False
 
 
 if __name__ == "__main__":
@@ -563,22 +585,20 @@ if __name__ == "__main__":
     gui: GUIClass = GUIClass(exit_event=exit_event,
                              use_mediapipe=True, fullscreen=args.fullscreen)
     voice_rec: VoiceRecognition = VoiceRecognition(exit_event)
-    keyboard_input = KeyboardInput(exit_event)
-    llama: Llama = Llama(exit_event)
 
-    gui.register_subscriber("voice-exit", voice_rec.voice_exit_handler)
+    keyboard_input = KeyboardInput(exit_event)
+    llm: ChatGPTAPI = ChatGPTAPI()
+
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
-    gui.register_subscriber("llama-exit", llama.llama_exit_handler)
-    gui.register_subscriber("llama-add-prompt", llama.add_prompt_handler)
-    gui.register_subscriber("kbd-exit", keyboard_input.kbd_exit)
+    gui.register_subscriber("llm-add-prompt", llm.add_prompt_handler)
     gui.register_subscriber("new-frame-to-record",
                             video_recorder.new_frame_event_handler)
     gui.register_subscriber("video-record-exit",
                             video_recorder.exit_event_handler)
 
     voice_rec.register_event_subscriber("voice_input_ready",
-                                        "llama",
-                                        llama.voice_rec_input_handler)
+                                        "llm",
+                                        llm.voice_rec_input_handler)
     voice_rec.register_event_subscriber("voice_input_ready",
                                         "kbd_input",
                                         keyboard_input.voice_input_ready_handler)
@@ -587,37 +607,38 @@ if __name__ == "__main__":
                                         gui.voice_input_ready_handler)
 
     keyboard_input.register_event_subscriber("keyboard_input_ready",
-                                             "llama",
-                                             llama.keyboard_input_handler)
-
-    llama.register_subscriber(
-        "gui-recieve-llama-response",
-        gui.llama_response_handler
+                                             "llm",
+                                             llm.keyboard_input_handler)
+    llm.register_event_subscriber(
+        "new-response",
+        "gui",
+        gui.llm_response_handler
     )
 
     gui.add_ui_component("llm-options", lambda x: x,)
     gui.add_ui_component("voice_rec_text", lambda x: x)
+    gui.add_ui_component("voice-recording-start", lambda x: x)
 
     voice_rec_thread: threading.Thread = threading.Thread(
-        target=voice_rec.start_voice_input
+        target=voice_rec.start_voice_input,
+        daemon=True
     )
-    llama_thread: threading.Thread = threading.Thread(
-        target=llama.start_conversation
+    llm_thread: threading.Thread = threading.Thread(
+        target=llm.start_conversation,
+        daemon=True
     )
     keyboard_input_thread: threading.Thread = threading.Thread(
-        target=keyboard_input.start_input
+        target=keyboard_input.start_input,
+        daemon=True
     )
     video_recorder_thread: threading.Thread = threading.Thread(
         target=video_recorder.write_video
     )
 
     voice_rec_thread.start()
-    llama_thread.start()
+    llm_thread.start()
     keyboard_input_thread.start()
     video_recorder_thread.start()
     gui.render()
 
-    voice_rec_thread.join()
-    llama_thread.join()
-    keyboard_input_thread.join()
     video_recorder_thread.join()

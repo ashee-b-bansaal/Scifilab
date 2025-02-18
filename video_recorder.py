@@ -56,29 +56,32 @@ class VideoRecorder():
 
     def exit_event_handler(self):
         self.frames_q.put_nowait(None)
-        self.need_exit = True
         with self.need_write_new_frame_cond:
-            self.need_write_new_frame = True
+            self.need_exit = True
             self.need_write_new_frame_cond.notify()
+        print("video exit handler finished")
 
     def graceful_exit(self):
         self.video_writer.release()
 
     def write_video(self):
         try:
-            with self.need_write_new_frame_cond:
-                while True:
-                    while not self.need_write_new_frame:
+            while True:
+                with self.need_write_new_frame_cond:
+                    while not self.need_write_new_frame and not self.need_exit:
                         if self.need_exit:
                             self.graceful_exit()
                             break
                         self.need_write_new_frame_cond.wait()
-                    frame = self.frames_q.get_nowait()
-                    if frame is None:
-                        self.graceful_exit()
-                        break
-                    self.video_writer.write(frame)
-                    self.need_write_new_frame = False
+                if self.need_exit:
+                    self.graceful_exit()
+                    break
+                frame = self.frames_q.get_nowait()
+                if frame is None:
+                    self.graceful_exit()
+                    break
+                self.video_writer.write(frame)
+                self.need_write_new_frame = False
         except:
             traceback.print_exc()
 

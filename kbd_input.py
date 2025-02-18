@@ -46,7 +46,7 @@ class KeyboardInput():
                 kbd_input = input("Please enter the keywords to generate the responses to what the hearing person just spoke: ")
                 self.notify_event_subscriber(
                     "keyboard_input_ready",
-                    "llama",
+                    "llm",
                     kbd_input
                 )
                 self.need_response = False
