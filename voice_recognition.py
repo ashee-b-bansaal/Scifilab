@@ -6,10 +6,8 @@ import traceback
 
 
 class VoiceRecognition():
-    def __init__(self,
-                 exit_event: threading.Event):
+    def __init__(self) -> None:
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()
-        self.exit_event = exit_event
 
         # the voice recognition thread should sleep (wait) until
         # the gui thread notify it that it needs voice recogintion
@@ -41,14 +39,6 @@ class VoiceRecognition():
         with self.need_recording_cond:
             self.need_recording_cond.notify()
 
-    def voice_exit_handler(self):
-        """
-        callback function for when the exit_event is set in another thread
-        and this thread needs to wake up
-        """
-        with self.need_recording_cond:
-            self.need_recording_cond.notify()
-
     def start_voice_input(self):
         """
         Records voice input from the microphone.
@@ -60,12 +50,8 @@ class VoiceRecognition():
         with self.need_recording_cond:
             while True:
                 while not self.need_recording:
-                    if self.exit_event.is_set():
-                        break
                     print("waiting for gui thread to request voice rec")
                     self.need_recording_cond.wait()
-                if self.exit_event.is_set():
-                    break
                 try:
                     print("started listening")
                     with sr.Microphone() as source:
@@ -83,7 +69,7 @@ class VoiceRecognition():
                     )
                     self.notify_event_subscriber(
                         "voice_input_ready",
-                        "kbd_input"
+                        "keyword_input"
                     )
                     self.notify_event_subscriber(
                         "voice_input_ready",
@@ -97,10 +83,8 @@ class VoiceRecognition():
                 except sr.RequestError as e:
                     print(f"Error with the speech recognition service: {e}")
                     traceback.print_exc()
-                    self.exit_event.set()
                     break
                 except Exception as e:
                     print(f"Error during voice recording: {e}")
                     traceback.print_exc()
-                    self.exit_event.set()
                     break

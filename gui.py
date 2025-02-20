@@ -18,11 +18,14 @@ from kbd_input import KeyboardInput
 import pyttsx3
 from video_recorder import VideoRecorder
 from chatgpt_api import ChatGPTAPI
+from android_input import AndroidInput
+from tcp_server import TCPServer
+from events import *
 
 
 engine = pyttsx3.init()
 
-# recorder = AudioToTextRecorder(
+# recorder = AudioToTextRexcorder(
 #     language="en",
 #     # on_recording_start=gui.on_voice_recording_start,
 #     # on_recording_stop=gui.on_voice_recording_stop
@@ -550,6 +553,15 @@ if __name__ == "__main__":
         "--fullscreen",
         help="whether to display the gui in fullscreen",
         action='store_true')
+    parser.add_argument(
+        "-wi",
+        "--word-input",
+        help="whether to use the keyboard or android phone to input keywords",
+        choices = ["keyboard", "android"],
+        default = 'keyboard',
+        nargs = "?",
+        const = "keyboard"
+    )
 
     args = parser.parse_args()
 
@@ -584,10 +596,51 @@ if __name__ == "__main__":
     exit_event: threading.Event = threading.Event()
     gui: GUIClass = GUIClass(exit_event=exit_event,
                              use_mediapipe=True, fullscreen=args.fullscreen)
-    voice_rec: VoiceRecognition = VoiceRecognition(exit_event)
+    voice_rec: VoiceRecognition = VoiceRecognition()
 
-    keyboard_input = KeyboardInput(exit_event)
     llm: ChatGPTAPI = ChatGPTAPI()
+
+    
+    if args.word_input == "keyboard":
+        keyboard_input = KeyboardInput()
+
+        keyboard_input.register_event_subscriber("keyboard_input_ready",
+                                             "llm",
+                                             llm.keyword_input_handler)
+        voice_rec.register_event_subscriber("voice_input_ready",
+                                        "keyword_input",
+                                        keyboard_input.voice_input_ready_handler)
+
+        keyboard_input_thread: threading.Thread = threading.Thread(
+            target=keyboard_input.start_input,
+            daemon=True
+        )
+        keyboard_input_thread.start()
+    elif args.word_input == "android":
+        tcp_serv = TCPServer()
+        android_input = AndroidInput()
+        tcp_serv.register_event_subscriber(
+            TCPServerEvents.MSG_RECEIVED,
+            "android_input",
+            android_input.server_msg_received_handler
+        )
+
+        tcp_serv_thread = threading.Thread(target=tcp_serv.start_server, daemon=True)
+        tcp_serv_thread.start()
+        android_input.register_event_subscriber(AndroidInputEvents.INPUT_READY,
+                                                "llm",
+                                                llm.keyword_input_handler)
+        voice_rec.register_event_subscriber("voice_input_ready",
+                                            "keyword_input",
+                                            android_input.voice_input_ready_handler)
+        android_input_thread: threading.Thread = threading.Thread(
+            target=android_input.start_input,
+            daemon=True
+        )
+        android_input_thread.start()
+        
+
+
 
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
     gui.register_subscriber("llm-add-prompt", llm.add_prompt_handler)
@@ -599,16 +652,12 @@ if __name__ == "__main__":
     voice_rec.register_event_subscriber("voice_input_ready",
                                         "llm",
                                         llm.voice_rec_input_handler)
-    voice_rec.register_event_subscriber("voice_input_ready",
-                                        "kbd_input",
-                                        keyboard_input.voice_input_ready_handler)
+    
     voice_rec.register_event_subscriber("voice_input_ready",
                                         "gui",
                                         gui.voice_input_ready_handler)
 
-    keyboard_input.register_event_subscriber("keyboard_input_ready",
-                                             "llm",
-                                             llm.keyboard_input_handler)
+    
     llm.register_event_subscriber(
         "new-response",
         "gui",
@@ -627,17 +676,15 @@ if __name__ == "__main__":
         target=llm.start_conversation,
         daemon=True
     )
-    keyboard_input_thread: threading.Thread = threading.Thread(
-        target=keyboard_input.start_input,
-        daemon=True
-    )
+    
+    
+    
     video_recorder_thread: threading.Thread = threading.Thread(
         target=video_recorder.write_video
     )
 
     voice_rec_thread.start()
     llm_thread.start()
-    keyboard_input_thread.start()
     video_recorder_thread.start()
     gui.render()
 

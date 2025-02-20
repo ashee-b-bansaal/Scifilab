@@ -28,11 +28,11 @@ class ChatGPTAPI():
         # the voice recognition thread will put the text
         # into this queue via the add_prompt_handler
         self.voice_rec_q: queue.Queue = queue.Queue()
-
+        
         # after the keyboard input is entered, a tuple of keyboard input and
         # text from voice_rec_q is added here
         self.prompt_q: queue.Queue = queue.Queue()
-
+        
         self.messages: list[dict] = [{
             "role": "developer",
             "content": "Your role is to help facilitate a conversation happening between person A and person B. You will be given what person A says. You have to generate 3 short 1-sentence responses each on its own line with a number at the start for person B based on a few keywords. Person B will then choose one of these 3 responses and you should remember their response."
@@ -51,7 +51,7 @@ class ChatGPTAPI():
                                 subsciber_name: str, *args):
         self.event_subscribers[event_name][subsciber_name](*args)
 
-    def keyboard_input_handler(self, kbd_input: str):
+    def keyword_input_handler(self, kbd_input: str):
         """
         the event is "keyboard_input", the keyboard thread calls this method
         once the user has inputted something. The assumption is that the
