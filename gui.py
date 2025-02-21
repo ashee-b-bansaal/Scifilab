@@ -286,7 +286,9 @@ class GUIClass():
 
     """
 
-    def __init__(self, exit_event: threading.Event, use_mediapipe=True, fullscreen=False):
+    def __init__(self, exit_event: threading.Event, use_mediapipe=True, fullscreen=False, black=False):
+        self.black = black
+        
         self.fullscreen = fullscreen
         # list of the subscribers (str) along with their methods.
         # when an event of interest occurs, the gui object will
@@ -393,7 +395,7 @@ class GUIClass():
             pass
 
     def render(self):
-        cam = cv2.VideoCapture(0)
+        cam = cv2.VideoCapture(4)
         cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
         cam.set(cv2.CAP_PROP_FPS, 30.0)
@@ -416,6 +418,8 @@ class GUIClass():
                         mp_input,
                         time.time_ns() // 1_000_000
                     )
+                if self.black:
+                    self.canvas = np.zeros(self.canvas.shape)
                 self.update_canvas()
                 self.notify_subscriber(
                     "new-frame-to-record", copy.deepcopy(self.canvas))
@@ -562,6 +566,12 @@ if __name__ == "__main__":
         nargs = "?",
         const = "keyboard"
     )
+    parser.add_argument(
+        "-b",
+        "--black",
+        help="whether to black out the screen to display on xreal glasses or not",
+        action="store_true"
+    )
 
     args = parser.parse_args()
 
@@ -595,7 +605,9 @@ if __name__ == "__main__":
 
     exit_event: threading.Event = threading.Event()
     gui: GUIClass = GUIClass(exit_event=exit_event,
-                             use_mediapipe=True, fullscreen=args.fullscreen)
+                             use_mediapipe=True,
+                             fullscreen=args.fullscreen,
+                             black=args.black)
     voice_rec: VoiceRecognition = VoiceRecognition()
 
     llm: ChatGPTAPI = ChatGPTAPI()
@@ -638,8 +650,6 @@ if __name__ == "__main__":
             daemon=True
         )
         android_input_thread.start()
-        
-
 
 
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
@@ -676,8 +686,6 @@ if __name__ == "__main__":
         target=llm.start_conversation,
         daemon=True
     )
-    
-    
     
     video_recorder_thread: threading.Thread = threading.Thread(
         target=video_recorder.write_video

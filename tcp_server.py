@@ -2,7 +2,9 @@ import socket
 from typing import Callable
 from events import Events, TCPServerEvents
 
-IP = "10.49.60.204"
+
+# Red rover at dorm
+IP = "10.49.90.168"
 PORT = 5432
 
 
