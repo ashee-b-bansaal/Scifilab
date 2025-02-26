@@ -5,13 +5,14 @@ import traceback
 
 
 class VoiceRecognition():
-    def __init__(self) -> None:
+    def __init__(self, input_device_index=None) -> None:
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()
 
         # the voice recognition thread should sleep (wait) until
         # the gui thread notify it that it needs voice recogintion
         self.need_recording_cond: threading.Condition = threading.Condition()
         self.need_recording = False
+        self.input_device_index=input_device_index
 
     def register_event_subscriber(self,
                                   event_name: str,
@@ -43,8 +44,7 @@ class VoiceRecognition():
         Records voice input from the microphone.
         """
         recognizer = sr.Recognizer()
-        device_index = None 
-        with sr.Microphone(device_index=device_index) as source: 
+        with sr.Microphone(device_index=self.input_device_index) as source: 
             print("adjusting for ambiant noise")
             recognizer.adjust_for_ambient_noise(source)
         with self.need_recording_cond:
@@ -54,7 +54,7 @@ class VoiceRecognition():
                     self.need_recording_cond.wait()
                 try:
                     print("started listening")
-                    with sr.Microphone() as source:
+                    with sr.Microphone(device_index=self.input_device_index) as source:
                         audio = recognizer.listen(
                             source
                         )

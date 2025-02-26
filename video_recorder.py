@@ -1,3 +1,4 @@
+import copy
 import os
 import cv2
 import threading
@@ -49,15 +50,16 @@ class VideoRecorder():
         self.event_subscribers[event_name][subsciber_name](*args)
 
     def new_frame_event_handler(self, new_frame):
-        self.frames_q.put_nowait(new_frame)
-        self.need_write_new_frame = True
+        self.frames_q.put_nowait((new_frame))
         with self.need_write_new_frame_cond:
+            self.need_write_new_frame = True
             self.need_write_new_frame_cond.notify()
 
     def exit_event_handler(self):
         self.frames_q.put_nowait(None)
         with self.need_write_new_frame_cond:
-            self.need_exit = True
+            self.need_write_new_frame = True
+            self.need_exit=True
             self.need_write_new_frame_cond.notify()
         print("video exit handler finished")
 
@@ -66,23 +68,24 @@ class VideoRecorder():
         print("video released")
 
     def write_video(self):
+        print("write video entered")
         try:
             while True:
                 with self.need_write_new_frame_cond:
-                    while not self.need_write_new_frame or not self.need_exit:
+                    while not self.need_write_new_frame:
                         if self.need_exit:
                             self.graceful_exit()
                             break
                         self.need_write_new_frame_cond.wait()
-                if self.need_exit:
-                    self.graceful_exit()
-                    break
-                frame = self.frames_q.get_nowait()
-                if frame is None:
-                    self.graceful_exit()
-                    break
-                self.video_writer.write(frame)
-                self.need_write_new_frame = False
+                    if self.need_exit:
+                        self.graceful_exit()
+                        break
+                    frame = self.frames_q.get_nowait()
+                    if frame is None:
+                        self.graceful_exit()
+                        break
+                    self.video_writer.write(frame)
+                    self.need_write_new_frame = False
         except:
             traceback.print_exc()
         print("done")

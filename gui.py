@@ -1,3 +1,5 @@
+import linecache
+import gc
 from datetime import datetime
 import os
 import shutil
@@ -21,7 +23,44 @@ from android_input import AndroidInput
 from tcp_server import TCPServer
 from tts import TTS, Emotions
 from events import *
+import tracemalloc
 
+
+# with open('./keypoint_classifier/keypoint_classifier_label.csv',
+#           encoding='utf-8-sig') as f:
+#     keypoint_classifier_labels_f = csv.reader(f)
+#     keypoint_classifier_labels = [
+#         row[0] for row in keypoint_classifier_labels_f
+#     ]
+
+
+def pre_process_landmark(landmark_list):
+    temp_landmark_list = copy.deepcopy(landmark_list)
+
+    # Convert to relative coordinates
+    base_x, base_y = 0, 0
+    for index, landmark_point in enumerate(temp_landmark_list):
+        if index == 0:
+            base_x, base_y = landmark_point[0], landmark_point[1]
+
+        temp_landmark_list[index][0] = temp_landmark_list[index][0] - base_x
+        temp_landmark_list[index][1] = temp_landmark_list[index][1] - base_y
+
+    # Convert to a one-dimensional list
+    temp_landmark_list = list(
+        itertools.chain.from_iterable(temp_landmark_list))
+
+    # Normalization
+    max_value = max(list(map(abs, temp_landmark_list)))
+
+    def normalize_(n):
+        return n / max_value
+
+    temp_landmark_list = list(map(normalize_, temp_landmark_list))
+
+    return temp_landmark_list
+
+# keypoint_classifier = KeyPointClassifier()
 
 
 # recorder = AudioToTextRexcorder(
@@ -82,11 +121,13 @@ class OptionComponent():
                  line_width: int,
                  bot_left: Tuple[int, int],
                  progress_100_callback: Callable,
-                 progress_speed=1):
+                 progress_speed=2,
+                 value = None):
         """
         bot_left means the bottom left of where the intended string is
         supposed to go, which is the first line of the wrapped string
         """
+        self.value = value
         self.text = text
         self.text_list = textwrap.wrap(text, line_width)
         self.line_width = line_width
@@ -207,6 +248,10 @@ class OptionComponent():
     def unbold(self):
         self.thickness = 1
 
+    def reset(self):
+        self.selection_progress = 0
+        self.unbold()
+
 
 def _normalized_to_pixel_coordinates(normalized_x: float,
                                      normalized_y: float,
@@ -308,8 +353,7 @@ class GUIClass():
 
         # canvas to draw everything on, in the render method,
         # this should be updated as the camera read frames.
-        self.canvas = np.zeros(0)
-
+        self.canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
         self.frame_height = -1
         self.frame_width = -1
 
@@ -325,6 +369,36 @@ class GUIClass():
         self.selected_llm_option_index = 0
         self.number_of_llm_options = 3
 
+        self.emotion_options: list[OptionComponent] = [
+            OptionComponent("SAD",
+                            50,
+                            (100, 100),
+                            self.emotion_progress_full_handler, value=Emotions.SAD),
+                            
+            OptionComponent("HAPPY",
+                            50,
+                            (100, 200),
+                            self.emotion_progress_full_handler, value=Emotions.HAPPY
+                            ),
+            OptionComponent("NEUTRAL",
+                            50,
+                            (100, 300),
+                            self.emotion_progress_full_handler, value=Emotions.NEUTRAL),
+
+            OptionComponent("TERRIFIED",
+                            50,
+                            (100, 400),
+                            self.emotion_progress_full_handler, value=Emotions.TERRIFIED),
+
+            OptionComponent("ANGRY",
+                            50,
+                            (100, 500),
+                            self.emotion_progress_full_handler, value=Emotions.ANGRY)
+        ]
+        
+        self.selected_emotion_option_index = 0
+        self.number_of_emotion_options = 5
+
         self.use_mediapipe = use_mediapipe
         if self.use_mediapipe:
             self.add_ui_component("mediapipe", lambda: None)
@@ -333,6 +407,7 @@ class GUIClass():
             running_mode=VisionRunningMode.LIVE_STREAM,
             result_callback=self.mediapipe_callback_handler)
 
+        
         self.voice_rec_text_component: VoiceRecTextComponent = VoiceRecTextComponent(
             "", 36, (0, 0))
 
@@ -396,45 +471,61 @@ class GUIClass():
         print(self.frame_width)
         with HandLandmarker.create_from_options(self.options) as landmarker:
             while True:
-                ret, self.canvas = cam.read()
+                ret, frame = cam.read()
+                if self.black:
+                    self.canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+                else:
+                    self.canvas = frame
                 if not ret:
                     print("can't parse frame")
                     break
                 if self.use_mediapipe:
                     mp_input = mp.Image(
                         image_format=mp.ImageFormat.SRGB,
-                        data=self.canvas
+                        data=frame
                     )
                     landmarker.detect_async(
                         mp_input,
                         time.time_ns() // 1_000_000
                     )
-                if self.black:
-                    self.canvas = np.zeros(self.canvas.shape)
                 self.update_canvas()
                 self.notify_subscriber(
-                    "new-frame-to-record", copy.deepcopy(self.canvas))
+                    "new-frame-to-record", self.canvas)
                 self.handle_input()
                 if self.fullscreen:
                     cv2.namedWindow("realtime llm", cv2.WND_PROP_FULLSCREEN)
                     cv2.setWindowProperty(
                         "realtime llm", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
                 else:
-                    cv2.namedWindow("realtime llm", cv2.WINDOW_GUI_NORMAL)
+                    cv2.namedWindow("realtime llm")
+                    pass
                 cv2.imshow("realtime llm", cv2.resize(
-                    self.canvas, (1920, 1080), interpolation=cv2.INTER_CUBIC))
+                    (self.canvas), (1920, 1080), interpolation=cv2.INTER_CUBIC))
                 if self.exit_event.is_set():
                     break
 
     def mediapipe_callback_handler(self, result, output_image, timestamp_ms):
+        # print(result.hand_landmarks)
+
         self.render_functions["mediapipe"] = lambda: draw_landmarks_on_image(
             self.canvas,
             result)
         self.render_ready["mediapipe"] = True
-        self.update_selected_option_mp(highest_point=hand_highest_point(
+        if self.render_ready["llm-options"]:
+            self.update_selected_llm_option_mp(highest_point=hand_highest_point(
             result, self.canvas.shape[1], self.canvas.shape[0]))
-
-    def update_selected_option_mp(self, highest_point):
+        if self.render_ready["emotion_options"]:
+            self.update_selected_emotion_option_mp(highest_point=hand_highest_point(
+            result, self.canvas.shape[1], self.canvas.shape[0]))
+        # if len(result.hand_landmarks) > 0:
+        #     pre_processed_landmark_list = pre_process_landmark(
+        #                 result.hand_landmarks)
+            
+        #     hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
+        #     print(keypoint_classifier_labels[hand_sign_id])
+        
+    ## LLM OPTIONS CODE SECTION
+    def update_selected_llm_option_mp(self, highest_point):
         i = 0
         if highest_point is None:
             return
@@ -445,6 +536,7 @@ class GUIClass():
                 return
             i += 1
 
+            
     def render_llm_options(self):
         for i in range(len(self.llm_options)):
             if i == self.selected_llm_option_index:
@@ -458,13 +550,7 @@ class GUIClass():
             self.llm_options[i].render_component(self.canvas)
 
     def llm_response_handler(self, response: str):
-        # ui_component_name = "llm-options"
-        # responses_list = response.splitlines()
-        # responses_list = [rep for rep in responses_list if rep[0].isdigit()]
-        # def render_options():
-        # self.render_functions[ui_component_name]
         print("response recieved by gui thread")
-
         line_width = 36
         llm_options = [rep for rep in response.splitlines() if len(
             rep) > 2 and rep[0].isdigit()]
@@ -480,26 +566,61 @@ class GUIClass():
                 OptionComponent(
                     llm_options[i],
                     line_width,
-                    text_bottom_left, self.progress_full_handler))
+                    text_bottom_left, self.llm_progress_full_handler))
 
-        self.render_functions["llm-options"] = lambda: self.render_llm_options()
         self.render_ready["llm-options"] = True
 
         self.render_ready["voice_rec_text"] = False
 
-    def progress_full_handler(self):
+    def llm_progress_full_handler(self):
         if self.render_ready['llm-options']:
             self.notify_subscriber(
                 "llm-add-prompt",
                 "B",
                 self.llm_options[self.selected_llm_option_index].text
             )
-            print("speaking, ", copy.deepcopy(
-                self.llm_options[self.selected_llm_option_index].text))
-            self.notify_subscriber("need_tts",Emotions.NEUTRAL,copy.deepcopy(
-                self.llm_options[self.selected_llm_option_index].text))
+            self.notify_subscriber(
+                "done_choosing_llm_option",
+                copy.deepcopy(self.llm_options[self.selected_llm_option_index].text))
             self.render_ready["llm-options"] = False
+            self.render_ready["emotion_options"] = True
 
+
+    def render_emotion_options(self):
+        for i in range(self.number_of_emotion_options):
+            if i == self.selected_emotion_option_index:
+                self.emotion_options[i].is_selected = True
+                self.emotion_options[i].color = (0, 0, 255)
+            else:
+                self.emotion_options[i].is_selected = False
+                self.emotion_options[i].color = (0, 255, 0)
+
+            self.emotion_options[i].update_progress()
+            self.emotion_options[i].render_component(self.canvas)
+
+    def emotion_progress_full_handler(self):
+        if self.render_ready['emotion_options']:
+            self.notify_subscriber(
+                "done_choosing_emotion_option",
+                self.emotion_options[self.selected_emotion_option_index].value
+            )
+            self.render_ready["emotion_options"] = False
+            for i in range(self.number_of_emotion_options):
+                self.emotion_options[i].reset()
+            
+
+    def update_selected_emotion_option_mp(self, highest_point):
+        i = 0
+        if highest_point is None:
+            return
+        for option in self.emotion_options:
+            top_left, bot_right = option.top_left, option.bot_right
+            if highest_point >= top_left[1] and highest_point <= bot_right[1]:
+                self.selected_emotion_option_index = i
+                return
+            i += 1
+
+    
     def voice_input_ready_handler(self, text: str):
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = VoiceRecTextComponent(
@@ -532,7 +653,37 @@ class GUIClass():
 
 
 
+def display_top(snapshot, key_type='lineno', limit=15):
+    snapshot = snapshot.filter_traces((
+        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
+        tracemalloc.Filter(False, "<unknown>"),
+    ))
+    top_stats = snapshot.statistics(key_type)
+
+    print("Top %s lines" % limit)
+    for index, stat in enumerate(top_stats[:limit], 1):
+        frame = stat.traceback[0]
+        # replace "/path/to/module/file.py" with "module/file.py"
+        filename = os.sep.join(frame.filename.split(os.sep)[-2:])
+        print("#%s: %s:%s: %.1f KiB"
+              % (index, filename, frame.lineno, stat.size / 1024))
+        line = linecache.getline(frame.filename, frame.lineno).strip()
+        if line:
+            print('    %s' % line)
+
+    other = top_stats[limit:]
+    if other:
+        size = sum(stat.size for stat in other)
+        print("%s other: %.1f KiB" % (len(other), size / 1024))
+    total = sum(stat.size for stat in top_stats)
+    print("Total allocated size: %.1f KiB" % (total / 1024))
+
+
+
+        
+
 if __name__ == "__main__":
+    tracemalloc.start()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-p",
@@ -566,6 +717,22 @@ if __name__ == "__main__":
         choices=["female","male"],
         default="male"
     )
+    parser.add_argument(
+        "-d",
+        "--delete",
+        help="whether to delete the folder specified or not",
+        action="store_true"
+    )
+    parser.add_argument(
+        "-oi",
+        "--output_index",
+        help="audio output index, based on python -m sounddevice"
+    )
+    parser.add_argument(
+        "-ii",
+        "--input_index",
+        help="audio input index, based on list_audio_indices.py"
+    )
 
     args = parser.parse_args()
 
@@ -573,18 +740,23 @@ if __name__ == "__main__":
     video_path = ""
 
     if os.path.exists(args.path):
-        print(
-            f"{args.path} already exists, do you want to delete the contents or no [y/n]")
-        while True:
-            delete_or_not = input()
-            if delete_or_not == "y":
-                delete_contents_folder(args.path)
-                os.mkdir(os.path.join(args.path, "video"))
-                break
-            elif delete_or_not == "n":
-                break
-            else:
-                print("please only enter y or n:")
+        if not args.delete:
+            print(
+                f"{args.path} already exists, do you want to delete the contents or no [y/n]")
+            while True:
+                delete_or_not = input()
+                if delete_or_not == "y":
+                    delete_contents_folder(args.path)
+                    os.mkdir(os.path.join(args.path, "video"))
+                    break
+                elif delete_or_not == "n":
+                    break
+                else:
+                    print("please only enter y or n:")
+        else:
+            delete_contents_folder(args.path)
+            os.mkdir(os.path.join(args.path, "video"))
+                
     else:
         os.mkdir(args.path)
         os.mkdir(os.path.join(args.path, "video"))
@@ -601,10 +773,11 @@ if __name__ == "__main__":
                              use_mediapipe=True,
                              fullscreen=args.fullscreen,
                              black=args.black)
-    voice_rec: VoiceRecognition = VoiceRecognition()
+    print(args.fullscreen)
+    voice_rec: VoiceRecognition = VoiceRecognition(input_device_index=args.input_index)
 
     llm: ChatGPTAPI = ChatGPTAPI()
-    tts: TTS = TTS(finished_speaking_handler=voice_rec.voice_start_handler, gender=args.voice_gender)
+    tts: TTS = TTS(finished_speaking_handler=voice_rec.voice_start_handler, gender=args.voice_gender,output_device_index=args.output_index)
     
     
     if args.word_input == "keyboard":
@@ -645,13 +818,17 @@ if __name__ == "__main__":
         )
         android_input_thread.start()
 
-    gui.register_subscriber("need_tts", tts.add_tts_handler)
+    gui.register_subscriber("done_choosing_llm_option", tts.add_text_handler)
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
     gui.register_subscriber("llm-add-prompt", llm.add_prompt_handler)
     gui.register_subscriber("new-frame-to-record",
                             video_recorder.new_frame_event_handler)
     gui.register_subscriber("video-record-exit",
                             video_recorder.exit_event_handler)
+    gui.register_subscriber(
+        "done_choosing_emotion_option",
+        tts.add_emotion_handler
+    )
 
     voice_rec.register_event_subscriber("voice_input_ready",
                                         "llm",
@@ -668,10 +845,11 @@ if __name__ == "__main__":
         gui.llm_response_handler
     )
 
-    gui.add_ui_component("llm-options", lambda x: x,)
+    gui.add_ui_component("llm-options", gui.render_llm_options)
     gui.add_ui_component("voice_rec_text", lambda x: x)
-    gui.add_ui_component("voice-recording-start", lambda x: x)
-
+    gui.add_ui_component("voice_recording_start", lambda x: x)
+    gui.add_ui_component("emotion_options", gui.render_emotion_options)
+    
     voice_rec_thread: threading.Thread = threading.Thread(
         target=voice_rec.start_voice_input,
         daemon=True
@@ -696,3 +874,7 @@ if __name__ == "__main__":
     gui.render()
     
     video_recorder_thread.join()
+    snapshot = tracemalloc.take_snapshot()
+    display_top(snapshot)
+
+    

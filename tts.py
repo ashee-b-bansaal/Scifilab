@@ -1,3 +1,4 @@
+import queue
 import logging
 from RealtimeTTS import TextToAudioStream, SystemEngine, AzureEngine, ElevenlabsEngine, GTTSEngine
 import queue
@@ -7,15 +8,11 @@ import traceback
 import time
 from dotenv import load_dotenv
 import os
-import sounddevice
-import azure.cognitiveservices.speech as speechsdk
 from enum import Enum
 
 
-
-
 FEMALE_VOICE="en-US-JennyNeural"
-MALE_VOICE="en-US-ChristopherNeural"
+MALE_VOICE="en-US-GuyNeural"
 
 load_dotenv()
 
@@ -25,6 +22,8 @@ class Emotions(Enum):
     SAD="depressed"
     HAPPY="cheerful"
     NEUTRAL="neutral"
+    ANGRY="angry"
+    TERRIFIED="terrified"
 
     # need angry, happy, sad, terrified, neutral
 
@@ -39,13 +38,22 @@ class TTS():
                                       speech_key=AZURE_SPEECH_KEY,
                                       voice=self.voice
                                       )
+        self.output_device_index=output_device_index
         self.tts_stream = TextToAudioStream(
             engine=self.tts_engine,
             on_audio_stream_stop = finished_speaking_handler,
             level=logging.INFO,
             frames_per_buffer=248,
-            output_device_index=None
+            output_device_index=self.output_device_index
         )
+        self.text_queue: queue.Queue = queue.Queue()
+
+    def add_text_handler(self, text:str):
+        self.text_queue.put_nowait(text)
+    
+    def add_emotion_handler(self, emotion:Emotions):
+        text = self.text_queue.get_nowait()
+        self.add_tts_handler(emotion, text)
 
     def add_tts_handler(self, emotion:Emotions, text:str):
         self.tts_q.put_nowait((emotion.value,text))
@@ -60,6 +68,7 @@ class TTS():
                     while not self.need_tts or self.tts_q.empty():
                         self.need_tts_cond.wait()
                     emotion,text = self.tts_q.get_nowait()
+                    print("tts emotion and text",emotion, text)
                     self.tts_engine.set_emotion(emotion, emotion_degree=2.0)
                     self.tts_stream.feed(text)
                     self.tts_stream.play()
@@ -70,7 +79,7 @@ class TTS():
             
     
 if __name__ == "__main__":
-    a = TTS(lambda: print("done"))
+    a = TTS(lambda: print("done"), gender="female")
     tts_thread: threading.Thread = threading.Thread(target = a.start_tts, daemon=True)
     tts_thread.start()
     a.add_tts_handler(Emotions.SAD,"i'm very sad")
