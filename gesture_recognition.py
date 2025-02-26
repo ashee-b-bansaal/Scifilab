@@ -8,6 +8,7 @@ import cv2
 from keypoint_classifier.keypoint_classifier import KeyPointClassifier
 import itertools
 from typing import Callable
+import mp_drawing_utils
 
 def calc_bounding_rect(image, landmarks):
     image_width, image_height = image.shape[1], image.shape[0]
@@ -74,7 +75,7 @@ def pre_process_landmark(landmark_list):
 
 class GestureRecognition:
     def __init__(self) -> None:
-        self.classifier = KeyPointClassifier()
+        self.keypoint_classifier = KeyPointClassifier()
         mp_hands = mp.solutions.hands
         self.hands = mp_hands.Hands(
             static_image_mode=False,
@@ -82,7 +83,7 @@ class GestureRecognition:
             min_detection_confidence=0.7,
             min_tracking_confidence=0.5,
         )
-        with open('model/keypoint_classifier/keypoint_classifier_label.csv',
+        with open('./keypoint_classifier/keypoint_classifier_label.csv',
               encoding='utf-8-sig') as f:
             keypoint_classifier_labels = csv.reader(f)
             self.keypoint_classifier_labels = [
@@ -100,6 +101,7 @@ class GestureRecognition:
         self.frames_q.put_nowait(copy.deepcopy(frame))
         with self.need_response_cond:
             self.need_response = True
+            self.need_response_cond.notify_all()
             
     def register_event_subscriber(self,
                                   event_name: str,
@@ -118,9 +120,9 @@ class GestureRecognition:
         while True:
             with self.need_response_cond:
                 # if doesn't need response or no frame to process then sleep
-                while not self.need_response or not self.frames_q.empty():
+                while not self.need_response or self.frames_q.empty():
                     self.need_response_cond.wait()
-                frame = self.frames_q.get_not_wait()
+                frame = self.frames_q.get_nowait()
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = self.hands.process(frame_rgb)
                 if results.multi_hand_landmarks is not None:
@@ -146,17 +148,54 @@ class GestureRecognition:
                         self.need_response = False
 
 if __name__ == "__main__":
-    # cam = cv2.VideoCapture(0)
-    # gesture_rec = GestureRecognition()
-    # gesture_rec.register_event_subscriber("finished_processing_frame", "gui", )
-    # while True:
-    #     ret, frame = cam.read()
-    #     if not ret:
-    #         break
-    #     key = cv2.waitKeyEx(1) & 0xFF
-    #     if key == 27:
-    #         break
-    pass
+    cam = cv2.VideoCapture(0)
+    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cam.set(cv2.CAP_PROP_FPS, 30.0)
+    cam.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    gesture_rec = GestureRecognition()
+    gesture_rec_thread = threading.Thread(
+        target = gesture_rec.start_recognition,
+        daemon=True
+    )
+    gesture_rec_thread.start()
+    canvas = np.zeros((480, 640, 3), dtype=np.uint8)
+    render_functions = dict()
+    render_ready = dict()
+
+    
+    def render_mediapipe(draw_bounding_rect, brect, hand_sign, landmark_list):
+        render_functions["mp"] = lambda: mp_drawing_utils.draw_gesture_and_landmarks_on_image(
+            canvas,
+            draw_bounding_rect,
+            brect,
+            hand_sign,
+            landmark_list)
+        render_ready["mp"] = True
+        
+    
+    gesture_rec.register_event_subscriber(
+        "finished_processing_frame",
+        "gui",
+        render_mediapipe)
+
+    
+    while True:
+        ret, frame = cam.read()
+        if not ret:
+            break
+        key = cv2.waitKeyEx(1) & 0xFF
+        if key == 27:
+            break
+        
+        canvas = frame
+        gesture_rec.new_frame_handler(canvas)
+        for key in render_ready:
+            if render_ready[key]:
+                render_functions[key]()
+        cv2.imshow("testing gesture recognition", canvas)
+    cam.release()
+    
         
     
 

@@ -24,14 +24,7 @@ from tcp_server import TCPServer
 from tts import TTS, Emotions
 from events import *
 import tracemalloc
-
-
-# with open('./keypoint_classifier/keypoint_classifier_label.csv',
-#           encoding='utf-8-sig') as f:
-#     keypoint_classifier_labels_f = csv.reader(f)
-#     keypoint_classifier_labels = [
-#         row[0] for row in keypoint_classifier_labels_f
-#     ]
+import mp_drawing_utils
 
 
 def pre_process_landmark(landmark_list):
@@ -319,7 +312,7 @@ def draw_landmarks_on_image(rgb_image, detection_result):
             detection_result, rgb_image.shape[1], rgb_image.shape[0])
 
         cv2.line(rgb_image, (0, hand_high),
-                 (1300, hand_high), (0, 0, 255), thickness=2)
+                 (1300, hand_high), (0, 0, 255), thickness=2)    
 
 
 class GUIClass():
@@ -331,7 +324,7 @@ class GUIClass():
 
     """
 
-    def __init__(self, exit_event: threading.Event, use_mediapipe=True, fullscreen=False, black=False):
+    def __init__(self, exit_event: threading.Event, fullscreen=False, black=False) -> None:
         self.black = black
         
         self.fullscreen = fullscreen
@@ -345,7 +338,6 @@ class GUIClass():
 
         # key is name : str, value is function to draw on canvas
         self.render_functions: dict[str, Callable] = dict()
-
         # whether the thing to render is ready to be rendered
         # (call the function in render_functions).
         # key is str, value is bool
@@ -770,7 +762,6 @@ if __name__ == "__main__":
 
     exit_event: threading.Event = threading.Event()
     gui: GUIClass = GUIClass(exit_event=exit_event,
-                             use_mediapipe=True,
                              fullscreen=args.fullscreen,
                              black=args.black)
     print(args.fullscreen)
