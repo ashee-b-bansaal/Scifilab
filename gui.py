@@ -12,9 +12,6 @@ import threading
 import math
 from typing import Callable, List, Mapping, Optional, Tuple, Union
 from voice_recognition import VoiceRecognition
-import mediapipe as mp
-from mediapipe import solutions
-from mediapipe.framework.formats import landmark_pb2
 import textwrap
 from kbd_input import KeyboardInput
 from video_recorder import VideoRecorder
@@ -25,54 +22,7 @@ from tts import TTS, Emotions
 from events import *
 import tracemalloc
 import mp_drawing_utils
-
-
-def pre_process_landmark(landmark_list):
-    temp_landmark_list = copy.deepcopy(landmark_list)
-
-    # Convert to relative coordinates
-    base_x, base_y = 0, 0
-    for index, landmark_point in enumerate(temp_landmark_list):
-        if index == 0:
-            base_x, base_y = landmark_point[0], landmark_point[1]
-
-        temp_landmark_list[index][0] = temp_landmark_list[index][0] - base_x
-        temp_landmark_list[index][1] = temp_landmark_list[index][1] - base_y
-
-    # Convert to a one-dimensional list
-    temp_landmark_list = list(
-        itertools.chain.from_iterable(temp_landmark_list))
-
-    # Normalization
-    max_value = max(list(map(abs, temp_landmark_list)))
-
-    def normalize_(n):
-        return n / max_value
-
-    temp_landmark_list = list(map(normalize_, temp_landmark_list))
-
-    return temp_landmark_list
-
-# keypoint_classifier = KeyPointClassifier()
-
-
-# recorder = AudioToTextRexcorder(
-#     language="en",
-#     # on_recording_start=gui.on_voice_recording_start,
-#     # on_recording_stop=gui.on_voice_recording_stop
-# )
-
-BaseOptions = mp.tasks.BaseOptions
-HandLandmarker = mp.tasks.vision.HandLandmarker
-HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
-HandLandmarkerResult = mp.tasks.vision.HandLandmarkerResult
-VisionRunningMode = mp.tasks.vision.RunningMode
-
-MARGIN = 10  # pixels
-FONT_SIZE = 1
-FONT_THICKNESS = 1
-HANDEDNESS_TEXT_COLOR = (88, 205, 54)  # vibrant green
-
+from gesture_recognition import hand_sign_to_index, GestureRecognition
 
 def delete_contents_folder(folder: str):
     """
@@ -87,7 +37,6 @@ def delete_contents_folder(folder: str):
                 shutil.rmtree(file_path)
         except Exception as e:
             print('Failed to delete %s. Reason: %s' % (file_path, e))
-
 
 
 class VoiceRecTextComponent():
@@ -390,15 +339,6 @@ class GUIClass():
         
         self.selected_emotion_option_index = 0
         self.number_of_emotion_options = 5
-
-        self.use_mediapipe = use_mediapipe
-        if self.use_mediapipe:
-            self.add_ui_component("mediapipe", lambda: None)
-        self.options = HandLandmarkerOptions(
-            base_options=BaseOptions(model_asset_path='hand_landmarker.task'),
-            running_mode=VisionRunningMode.LIVE_STREAM,
-            result_callback=self.mediapipe_callback_handler)
-
         
         self.voice_rec_text_component: VoiceRecTextComponent = VoiceRecTextComponent(
             "", 36, (0, 0))
@@ -461,72 +401,50 @@ class GUIClass():
         self.frame_width = int(cam.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(cam.get(cv2.CAP_PROP_FRAME_HEIGHT))
         print(self.frame_width)
-        with HandLandmarker.create_from_options(self.options) as landmarker:
-            while True:
-                ret, frame = cam.read()
-                if self.black:
-                    self.canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
-                else:
-                    self.canvas = frame
-                if not ret:
-                    print("can't parse frame")
-                    break
-                if self.use_mediapipe:
-                    mp_input = mp.Image(
-                        image_format=mp.ImageFormat.SRGB,
-                        data=frame
-                    )
-                    landmarker.detect_async(
-                        mp_input,
-                        time.time_ns() // 1_000_000
-                    )
-                self.update_canvas()
-                self.notify_subscriber(
-                    "new-frame-to-record", self.canvas)
-                self.handle_input()
-                if self.fullscreen:
-                    cv2.namedWindow("realtime llm", cv2.WND_PROP_FULLSCREEN)
-                    cv2.setWindowProperty(
-                        "realtime llm", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
-                else:
-                    cv2.namedWindow("realtime llm")
-                    pass
-                cv2.imshow("realtime llm", cv2.resize(
-                    (self.canvas), (1920, 1080), interpolation=cv2.INTER_CUBIC))
-                if self.exit_event.is_set():
-                    break
+        while True:
+            ret, frame = cam.read()
+            if self.black:
+                self.canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+            else:
+                self.canvas = frame
+            if not ret:
+                print("can't parse frame")
+                break
+            self.notify_subscriber("new-frame-to-process", frame)
+            self.update_canvas()
+            self.notify_subscriber(
+                "new-frame-to-record", self.canvas)
+            self.handle_input()
+            if self.fullscreen:
+                cv2.namedWindow("realtime llm", cv2.WND_PROP_FULLSCREEN)
+                cv2.setWindowProperty(
+                    "realtime llm", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+            else:
+                cv2.namedWindow("realtime llm")
+                pass
+            cv2.imshow("realtime llm", cv2.resize(
+                (self.canvas), (1920, 1080), interpolation=cv2.INTER_CUBIC))
+            if self.exit_event.is_set():
+                break
 
-    def mediapipe_callback_handler(self, result, output_image, timestamp_ms):
+    def mediapipe_callback_handler(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
         # print(result.hand_landmarks)
 
-        self.render_functions["mediapipe"] = lambda: draw_landmarks_on_image(
+        self.render_functions["mediapipe"] = lambda: mp_drawing_utils.draw_gesture_and_landmarks_on_image(
             self.canvas,
-            result)
+            draw_bounding_rectangle,
+            brect,
+            hand_sign,
+            landmark_list)
         self.render_ready["mediapipe"] = True
         if self.render_ready["llm-options"]:
-            self.update_selected_llm_option_mp(highest_point=hand_highest_point(
-            result, self.canvas.shape[1], self.canvas.shape[0]))
+            self.update_selected_llm_option_mp(hand_sign)
         if self.render_ready["emotion_options"]:
-            self.update_selected_emotion_option_mp(highest_point=hand_highest_point(
-            result, self.canvas.shape[1], self.canvas.shape[0]))
-        # if len(result.hand_landmarks) > 0:
-        #     pre_processed_landmark_list = pre_process_landmark(
-        #                 result.hand_landmarks)
-            
-        #     hand_sign_id = keypoint_classifier(pre_processed_landmark_list)
-        #     print(keypoint_classifier_labels[hand_sign_id])
+            self.update_selected_emotion_option_mp(hand_sign)
         
     ## LLM OPTIONS CODE SECTION
-    def update_selected_llm_option_mp(self, highest_point):
-        i = 0
-        if highest_point is None:
-            return
-        for option in self.llm_options:
-            top_left, bot_right = option.top_left, option.bot_right
-            if highest_point >= top_left[1] and highest_point <= bot_right[1]:
-                self.selected_llm_option_index = i
-                return
-            i += 1
+    def update_selected_llm_option_mp(self, hand_sign):
+        self.selected_llm_option_index = hand_sign_to_index(hand_sign)
 
             
     def render_llm_options(self):
@@ -601,16 +519,8 @@ class GUIClass():
                 self.emotion_options[i].reset()
             
 
-    def update_selected_emotion_option_mp(self, highest_point):
-        i = 0
-        if highest_point is None:
-            return
-        for option in self.emotion_options:
-            top_left, bot_right = option.top_left, option.bot_right
-            if highest_point >= top_left[1] and highest_point <= bot_right[1]:
-                self.selected_emotion_option_index = i
-                return
-            i += 1
+    def update_selected_emotion_option_mp(self, hand_sign):
+        self.selected_emotion_option_index = hand_sign_to_index(hand_sign)
 
     
     def voice_input_ready_handler(self, text: str):
@@ -669,10 +579,6 @@ def display_top(snapshot, key_type='lineno', limit=15):
         print("%s other: %.1f KiB" % (len(other), size / 1024))
     total = sum(stat.size for stat in top_stats)
     print("Total allocated size: %.1f KiB" % (total / 1024))
-
-
-
-        
 
 if __name__ == "__main__":
     tracemalloc.start()
@@ -769,7 +675,7 @@ if __name__ == "__main__":
 
     llm: ChatGPTAPI = ChatGPTAPI()
     tts: TTS = TTS(finished_speaking_handler=voice_rec.voice_start_handler, gender=args.voice_gender,output_device_index=args.output_index)
-    
+    gesture_rec: GestureRecognition = GestureRecognition()
     
     if args.word_input == "keyboard":
         keyboard_input = KeyboardInput()
@@ -814,6 +720,8 @@ if __name__ == "__main__":
     gui.register_subscriber("llm-add-prompt", llm.add_prompt_handler)
     gui.register_subscriber("new-frame-to-record",
                             video_recorder.new_frame_event_handler)
+    gui.register_subscriber("new-frame-to-process",
+                            gesture_rec.new_frame_handler)
     gui.register_subscriber("video-record-exit",
                             video_recorder.exit_event_handler)
     gui.register_subscriber(
@@ -828,7 +736,7 @@ if __name__ == "__main__":
     voice_rec.register_event_subscriber("voice_input_ready",
                                         "gui",
                                         gui.voice_input_ready_handler)
-
+    
     
     llm.register_event_subscriber(
         "new-response",
@@ -836,11 +744,16 @@ if __name__ == "__main__":
         gui.llm_response_handler
     )
 
+    gesture_rec.register_event_subscriber("finished_processing_frame",
+                                          "gui",
+                                          gui.mediapipe_callback_handler)
+
     gui.add_ui_component("llm-options", gui.render_llm_options)
     gui.add_ui_component("voice_rec_text", lambda x: x)
     gui.add_ui_component("voice_recording_start", lambda x: x)
     gui.add_ui_component("emotion_options", gui.render_emotion_options)
-    
+    gui.add_ui_component("mediapipe", lambda: None)
+
     voice_rec_thread: threading.Thread = threading.Thread(
         target=voice_rec.start_voice_input,
         daemon=True
@@ -857,7 +770,12 @@ if __name__ == "__main__":
         target=tts.start_tts,
         daemon=True
     )
-
+    gesture_rec_thread: threading.Thread = threading.Thread(
+        target = gesture_rec.start_recognition,
+        daemon=True
+    )
+    
+    gesture_rec_thread.start()
     voice_rec_thread.start()
     llm_thread.start()
     video_recorder_thread.start()

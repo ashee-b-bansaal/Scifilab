@@ -10,6 +10,23 @@ import itertools
 from typing import Callable
 import mp_drawing_utils
 
+
+with open('./keypoint_classifier/keypoint_classifier_label.csv',
+              encoding='utf-8-sig') as f:
+            keypoint_classifier_labels_f = csv.reader(f)
+            keypoint_classifier_labels = [
+                row[0] for row in keypoint_classifier_labels_f
+            ]
+
+def hand_sign_to_index(hand_sign: str):
+    if hand_sign == "Open":
+        return 2
+    if hand_sign == "Pointer":
+        return 1
+    if hand_sign == "Close":
+        return 0
+    
+            
 def calc_bounding_rect(image, landmarks):
     image_width, image_height = image.shape[1], image.shape[0]
 
@@ -83,12 +100,7 @@ class GestureRecognition:
             min_detection_confidence=0.7,
             min_tracking_confidence=0.5,
         )
-        with open('./keypoint_classifier/keypoint_classifier_label.csv',
-              encoding='utf-8-sig') as f:
-            keypoint_classifier_labels = csv.reader(f)
-            self.keypoint_classifier_labels = [
-                row[0] for row in keypoint_classifier_labels
-            ]
+
         self.draw_bounding_rectangle = True
 
         self.need_response = False
@@ -138,7 +150,7 @@ class GestureRecognition:
                         # Hand sign classification
                         hand_sign_id = self.keypoint_classifier(pre_processed_landmark_list)
 
-                        hand_sign = self.keypoint_classifier_labels[hand_sign_id]
+                        hand_sign = keypoint_classifier_labels[hand_sign_id]
 
                         self.notify_event_subscriber(
                             "finished_processing_frame",
@@ -165,6 +177,7 @@ if __name__ == "__main__":
 
     
     def render_mediapipe(draw_bounding_rect, brect, hand_sign, landmark_list):
+        print(hand_sign)
         render_functions["mp"] = lambda: mp_drawing_utils.draw_gesture_and_landmarks_on_image(
             canvas,
             draw_bounding_rect,
