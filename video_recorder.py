@@ -63,12 +63,13 @@ class VideoRecorder():
 
     def graceful_exit(self):
         self.video_writer.release()
+        print("video released")
 
     def write_video(self):
         try:
             while True:
                 with self.need_write_new_frame_cond:
-                    while not self.need_write_new_frame and not self.need_exit:
+                    while not self.need_write_new_frame or not self.need_exit:
                         if self.need_exit:
                             self.graceful_exit()
                             break
@@ -84,6 +85,7 @@ class VideoRecorder():
                 self.need_write_new_frame = False
         except:
             traceback.print_exc()
+        print("done")
 
 
 if __name__ == "__main__":

@@ -1,66 +1,104 @@
-import pyttsx3
+import logging
+from RealtimeTTS import TextToAudioStream, SystemEngine, AzureEngine, ElevenlabsEngine, GTTSEngine
 import queue
 from typing import Callable
 import threading
 import traceback
 import time
+from dotenv import load_dotenv
+import os
+import sounddevice
+import azure.cognitiveservices.speech as speechsdk
+from enum import Enum
+
+
+
+
+FEMALE_VOICE="en-US-JennyNeural"
+MALE_VOICE="en-US-ChristopherNeural"
+
+load_dotenv()
+
+AZURE_SPEECH_KEY = os.getenv('AZURE_SPEECH_KEY')
+
+class Emotions(Enum):
+    SAD="depressed"
+    HAPPY="cheerful"
+    NEUTRAL="neutral"
+
+    # need angry, happy, sad, terrified, neutral
 
 
 class TTS():
-    def __init__(self, finished_speaking_handler: Callable):
-        self.engine = pyttsx3.init()
+    def __init__(self, finished_speaking_handler: Callable, output_device_index=None,gender="female"):
         self.tts_q: queue.Queue = queue.Queue()
-
-        self.engine.connect('finished-utterance', finished_speaking_handler)
-
+        self.voice= FEMALE_VOICE if gender=="female" else MALE_VOICE
         self.need_tts: bool = False
         self.need_tts_cond: threading.Condition = threading.Condition()
-        self.finished_speaking_handler = finished_speaking_handler
+        self.tts_engine = AzureEngine(service_region="eastus",
+                                      speech_key=AZURE_SPEECH_KEY,
+                                      voice=self.voice
+                                      )
+        self.tts_stream = TextToAudioStream(
+            engine=self.tts_engine,
+            on_audio_stream_stop = finished_speaking_handler,
+            level=logging.INFO,
+            frames_per_buffer=248,
+            output_device_index=None
+        )
 
-    def add_tts_handler(self, text):
-        self.tts_q.put_nowait(text)
-        with self.need_tts_cond:
-            self.need_tts = True
-            self.need_tts_cond.notify()
-
-    def exit_handler(self):
-        self.tts_q.put_nowait(None)
+    def add_tts_handler(self, emotion:Emotions, text:str):
+        self.tts_q.put_nowait((emotion.value,text))
         with self.need_tts_cond:
             self.need_tts = True
             self.need_tts_cond.notify()
 
     def start_tts(self):
         try:
-            with self.need_tts_cond:
-                while True:
-                    while not self.need_tts:
+            while True:
+                with self.need_tts_cond:
+                    while not self.need_tts or self.tts_q.empty():
                         self.need_tts_cond.wait()
-                    text = self.tts_q.get_nowait()
-                    if text is None:
-                        break
-                    print(text)
-                    self.engine.say(text, 'text')
-                    self.engine.runAndWait()
+                    emotion,text = self.tts_q.get_nowait()
+                    self.tts_engine.set_emotion(emotion, emotion_degree=2.0)
+                    self.tts_stream.feed(text)
+                    self.tts_stream.play()
                     self.need_tts = False
-                    # time.sleep(3)
-                    # self.finished_speaking_handler()
-                    print("done speak")
-            print("tts thread exited")
         except:
             traceback.print_exc()
 
-def print_bruh(name: str, comp: bool):
-    print("hello mate")
-
+            
+    
 if __name__ == "__main__":
-    a = TTS(print_bruh)
-    tts_thread: threading.Thread = threading.Thread(target = a.start_tts)
+    a = TTS(lambda: print("done"))
+    tts_thread: threading.Thread = threading.Thread(target = a.start_tts, daemon=True)
     tts_thread.start()
-    time.sleep(1)
-    a.add_tts_handler("brother my hand is cold end")
+    a.add_tts_handler(Emotions.SAD,"i'm very sad")
     time.sleep(2)
-    a.add_tts_handler("the weather is so nice today end")
-    time.sleep(4)
-    a.add_tts_handler(None)
-    tts_thread.join()
+
+    a.add_tts_handler(Emotions.HAPPY,"the weather is so nice today")
+    time.sleep(5)
     print("done")
+
+#     speech_config = speechsdk.SpeechConfig(subscription=os.environ.get('AZURE_SPEECH_KEY'), region="eastus")
+#     audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
+#     speech_config.speech_synthesis_voice_name='en-US-AvaMultilingualNeural'
+#     speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
+#     ssml = """
+#     <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
+#     <voice name="en-US-AvaMultilingualNeural">
+#         <mstts:express-as style="cheerful" styledegree="2">
+#             That'd be just amazing!
+#         </mstts:express-as>
+#         <mstts:express-as style="my-custom-style" styledegree="0.01">
+#             What's next?
+#         </mstts:express-as>
+#     </voice>
+# </speak>
+#     """
+#     speech_synthesizer.speak_ssml_async(ssml).get()
+
+
+
+    
+

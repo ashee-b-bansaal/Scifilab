@@ -1,4 +1,3 @@
-import sounddevice
 import speech_recognition as sr
 import threading
 from typing import Callable
@@ -44,7 +43,8 @@ class VoiceRecognition():
         Records voice input from the microphone.
         """
         recognizer = sr.Recognizer()
-        with sr.Microphone() as source: 
+        device_index = None 
+        with sr.Microphone(device_index=device_index) as source: 
             print("adjusting for ambiant noise")
             recognizer.adjust_for_ambient_noise(source)
         with self.need_recording_cond:

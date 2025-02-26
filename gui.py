@@ -15,15 +15,14 @@ from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
 import textwrap
 from kbd_input import KeyboardInput
-import pyttsx3
 from video_recorder import VideoRecorder
 from chatgpt_api import ChatGPTAPI
 from android_input import AndroidInput
 from tcp_server import TCPServer
+from tts import TTS, Emotions
 from events import *
 
 
-engine = pyttsx3.init()
 
 # recorder = AudioToTextRexcorder(
 #     language="en",
@@ -56,6 +55,7 @@ def delete_contents_folder(folder: str):
                 shutil.rmtree(file_path)
         except Exception as e:
             print('Failed to delete %s. Reason: %s' % (file_path, e))
+
 
 
 class VoiceRecTextComponent():
@@ -371,6 +371,7 @@ class GUIClass():
                 if "-exit" in subscriber:
                     print("SUBCRIBRE TRYING TO EXIT IS", subscriber)
                     self.notify_subscriber(subscriber)
+            print("esc done")
         elif pressed_key == ord(' '):
             self.notify_subscriber("voice-start")
         elif pressed_key == 84:  # up arrow:
@@ -382,16 +383,6 @@ class GUIClass():
                 self.selected_llm_option_index = (
                     self.selected_llm_option_index - 1) % self.number_of_llm_options
         elif pressed_key == 13:  # enter key
-            # this is deprecated code before the hand tracking to choose is implemented
-            # if self.render_ready['llm-options']:
-            #     self.notify_subscriber(
-            #         "llama-add-prompt",
-            #         "ui",
-            #         self.llm_options[self.selected_llm_option_index].text
-            #     )
-            #     engine.say(copy.deepcopy(self.llm_options[self.selected_llm_option_index].text))
-            #     engine.runAndWait()kill
-            #     self.render_ready["llm-options"] = False
             pass
 
     def render(self):
@@ -503,16 +494,10 @@ class GUIClass():
                 "B",
                 self.llm_options[self.selected_llm_option_index].text
             )
-            # engine.say(copy.deepcopy(self.llm_options[self.selected_llm_option_index].text), 'text')
-            # self.notify_subscriber(
-            # "tts-speak-option",
-            # copy.deepcopy(
-            # self.llm_options[self.selected_llm_option_index].text))
             print("speaking, ", copy.deepcopy(
                 self.llm_options[self.selected_llm_option_index].text))
-            engine.say(copy.deepcopy(
+            self.notify_subscriber("need_tts",Emotions.NEUTRAL,copy.deepcopy(
                 self.llm_options[self.selected_llm_option_index].text))
-            engine.runAndWait()
             self.render_ready["llm-options"] = False
 
     def voice_input_ready_handler(self, text: str):
@@ -545,6 +530,8 @@ class GUIClass():
         self.render_ready["voice-recording-start"] = False
 
 
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -572,6 +559,13 @@ if __name__ == "__main__":
         help="whether to black out the screen to display on xreal glasses or not",
         action="store_true"
     )
+    parser.add_argument(
+        "-vg",
+        "--voice-gender",
+        help="gender",
+        choices=["female","male"],
+        default="male"
+    )
 
     args = parser.parse_args()
 
@@ -591,7 +585,6 @@ if __name__ == "__main__":
                 break
             else:
                 print("please only enter y or n:")
-
     else:
         os.mkdir(args.path)
         os.mkdir(os.path.join(args.path, "video"))
@@ -611,7 +604,8 @@ if __name__ == "__main__":
     voice_rec: VoiceRecognition = VoiceRecognition()
 
     llm: ChatGPTAPI = ChatGPTAPI()
-
+    tts: TTS = TTS(finished_speaking_handler=voice_rec.voice_start_handler, gender=args.voice_gender)
+    
     
     if args.word_input == "keyboard":
         keyboard_input = KeyboardInput()
@@ -651,7 +645,7 @@ if __name__ == "__main__":
         )
         android_input_thread.start()
 
-
+    gui.register_subscriber("need_tts", tts.add_tts_handler)
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
     gui.register_subscriber("llm-add-prompt", llm.add_prompt_handler)
     gui.register_subscriber("new-frame-to-record",
@@ -690,10 +684,15 @@ if __name__ == "__main__":
     video_recorder_thread: threading.Thread = threading.Thread(
         target=video_recorder.write_video
     )
+    tts_thread: threading.Thread = threading.Thread(
+        target=tts.start_tts,
+        daemon=True
+    )
 
     voice_rec_thread.start()
     llm_thread.start()
     video_recorder_thread.start()
+    tts_thread.start()
     gui.render()
-
+    
     video_recorder_thread.join()

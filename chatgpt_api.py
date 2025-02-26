@@ -11,7 +11,7 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-NUMBER_OF_OPTIONS = 3
+NUMBER_OF_OPTIONS = 3 #this should be 4
 
 def generate_person_a_prompt(voice_rec_input: str, kbd_input: str):
     return f"Person A says: \"{voice_rec_input}\"." \
