@@ -11,7 +11,7 @@ from typing import Callable
 import mp_drawing_utils
 
 
-with open('./keypoint_classifier/keypoint_classifier_label.csv',
+with open('./keypoint_classifier/keypoint_classifier_new_label.csv',
               encoding='utf-8-sig') as f:
             keypoint_classifier_labels_f = csv.reader(f)
             keypoint_classifier_labels = [
@@ -19,12 +19,8 @@ with open('./keypoint_classifier/keypoint_classifier_label.csv',
             ]
 
 def hand_sign_to_index(hand_sign: str):
-    if hand_sign == "Open":
-        return 2
-    if hand_sign == "Pointer":
-        return 1
-    if hand_sign == "Close":
-        return 0
+    print(hand_sign)
+    return 0
     
             
 def calc_bounding_rect(image, landmarks):
@@ -151,7 +147,6 @@ class GestureRecognition:
                         hand_sign_id = self.keypoint_classifier(pre_processed_landmark_list)
 
                         hand_sign = keypoint_classifier_labels[hand_sign_id]
-
                         self.notify_event_subscriber(
                             "finished_processing_frame",
                             "gui",
@@ -160,7 +155,7 @@ class GestureRecognition:
                         self.need_response = False
 
 if __name__ == "__main__":
-    cam = cv2.VideoCapture(0)
+    cam = cv2.VideoCapture(4)
     cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cam.set(cv2.CAP_PROP_FPS, 30.0)
@@ -177,7 +172,6 @@ if __name__ == "__main__":
 
     
     def render_mediapipe(draw_bounding_rect, brect, hand_sign, landmark_list):
-        print(hand_sign)
         render_functions["mp"] = lambda: mp_drawing_utils.draw_gesture_and_landmarks_on_image(
             canvas,
             draw_bounding_rect,

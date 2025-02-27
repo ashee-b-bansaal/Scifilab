@@ -190,14 +190,13 @@ def draw_landmarks(image, landmark_point):
 
 def draw_gesture_and_landmarks_on_image(image, draw_bounding_rectangle,
                                         brect, gesture_name, landmark_list):
-
+    
     if draw_bounding_rectangle:
         cv2.rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]),
                      (0, 0, 0), 1)
     draw_landmarks(image, landmark_list)
     cv2.putText(image, gesture_name, (brect[0] + 5, brect[1] - 4),
             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
-
     
     
 

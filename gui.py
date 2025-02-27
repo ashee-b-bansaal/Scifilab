@@ -410,7 +410,7 @@ class GUIClass():
             if not ret:
                 print("can't parse frame")
                 break
-            self.notify_subscriber("new-frame-to-process", frame)
+            self.notify_subscriber("new-frame-to-process",cv2.flip( frame, 1))
             self.update_canvas()
             self.notify_subscriber(
                 "new-frame-to-record", self.canvas)
@@ -426,16 +426,30 @@ class GUIClass():
                 (self.canvas), (1920, 1080), interpolation=cv2.INTER_CUBIC))
             if self.exit_event.is_set():
                 break
-
-    def mediapipe_callback_handler(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
-        # print(result.hand_landmarks)
-
-        self.render_functions["mediapipe"] = lambda: mp_drawing_utils.draw_gesture_and_landmarks_on_image(
+            
+    def render_mediapipe(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
+        if not self.black:
+            self.canvas = cv2.flip(self.canvas, 1)
+            mp_drawing_utils.draw_gesture_and_landmarks_on_image(
             self.canvas,
             draw_bounding_rectangle,
             brect,
             hand_sign,
             landmark_list)
+            self.canvas = cv2.flip(self.canvas, 1)
+        cv2.putText(self.canvas, f"Number:{hand_sign}", (900, 700), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        
+    def mediapipe_callback_handler(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
+        # print(result.hand_landmarks)
+        
+        self.render_functions["mediapipe"] = lambda: self.render_mediapipe(draw_bounding_rectangle, brect, hand_sign, landmark_list)
+    
+        # lambda: mp_drawing_utils.draw_gesture_and_landmarks_on_image(
+        #     self.canvas,
+        #     draw_bounding_rectangle,
+        #     brect,
+        #     hand_sign,
+        #     landmark_list)
         self.render_ready["mediapipe"] = True
         if self.render_ready["llm-options"]:
             self.update_selected_llm_option_mp(hand_sign)
@@ -443,8 +457,11 @@ class GUIClass():
             self.update_selected_emotion_option_mp(hand_sign)
         
     ## LLM OPTIONS CODE SECTION
-    def update_selected_llm_option_mp(self, hand_sign):
-        self.selected_llm_option_index = hand_sign_to_index(hand_sign)
+    def update_selected_llm_option_mp(self, hand_sign: str):
+        if int(hand_sign) <= 4:
+            self.selected_llm_option_index = int(hand_sign) - 1
+        else:
+            print("wtf")
 
             
     def render_llm_options(self):
@@ -519,8 +536,8 @@ class GUIClass():
                 self.emotion_options[i].reset()
             
 
-    def update_selected_emotion_option_mp(self, hand_sign):
-        self.selected_emotion_option_index = hand_sign_to_index(hand_sign)
+    def update_selected_emotion_option_mp(self, hand_sign: str):
+        self.selected_emotion_option_index = int(hand_sign) - 1
 
     
     def voice_input_ready_handler(self, text: str):
