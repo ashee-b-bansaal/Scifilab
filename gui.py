@@ -47,14 +47,39 @@ class VoiceRecTextComponent():
         self.text = text
         self.bot_left = bot_left
         self.line_width = line_width
-        self.text_list = textwrap.wrap(text, line_width)
+        self.text_list = textwrap.wrap(text, width=line_width)
+        self.bg_color = (255, 0, 0)
 
     def render_component(self, canvas):
-        y_offset = 0
+        font_scale = 1.0
+        font_thickness = 2
+        line_spacing = 10
+        padding = 10
+
+        # Calculate text dimensions
+        max_width = 0
+        total_height = 0
         for line in self.text_list:
-            cv2.putText(canvas, line, (self.bot_left[0], self.bot_left[1] + y_offset),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3, cv2.LINE_AA)
-            y_offset += 30
+            (text_width, text_height), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+            max_width = max(max_width, text_width)
+            total_height += text_height + line_spacing
+
+        # Calculate background rectangle dimensions
+        rect_start = (self.bot_left[0], self.bot_left[1] - total_height - padding -10)
+        rect_end = (self.bot_left[0] + max_width + 2*padding, self.bot_left[1])
+
+        # Draw background rectangle
+        cv2.rectangle(canvas, rect_start, rect_end, self.bg_color, -1)
+
+        # Draw text
+        y = self.bot_left[1] - padding
+        for line in reversed(self.text_list):  # Reverse to start from bottom
+            (_, text_height), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+            y -= text_height
+            cv2.putText(canvas, line, (self.bot_left[0] + padding, y), 
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness, cv2.LINE_AA)
+            y -= line_spacing
+
 
 
 class OptionComponent():
@@ -543,10 +568,10 @@ class GUIClass():
     def voice_input_ready_handler(self, text: str):
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = VoiceRecTextComponent(
-            text, 36, (self.canvas.shape[1] // 2 - 100, self.canvas.shape[0] // 2 - 100))
+            text, 25, (10, self.canvas.shape[0] - 10))
         self.render_functions["voice_rec_text"] = lambda: self.voice_rec_text_component.render_component(
             self.canvas)
-
+        
     def on_voice_recording_start(self):
         """
         Shows Recording Voice on screen to indicate that the hearing person's voice has been
