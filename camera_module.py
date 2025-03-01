@@ -1,46 +1,68 @@
+import time
+import copy
+import threading 
+from typing import Callable
 import cv2
 
-class CameraHandler():
-    def __init__(self):
-        self.cap = None
-        self.text_overlay = ""
+class OpenCVCamera():
+    def __init__(self,
+                 source_index: int,
+                 cam_height: int,
+                 cam_width: int,
+                 cam_fps: float,
+                 new_frame_handler: Callable) -> None:
+        self.source_index = source_index
+        self.cam = cv2.VideoCapture(self.source_index)
+        self.cam.set(cv2.CAP_PROP_FRAME_HEIGHT, cam_height)
+        self.cam.set(cv2.CAP_PROP_FRAME_WIDTH, cam_width) 
+        self.cam.set(cv2.CAP_PROP_FPS, cam_fps)
+        self.cam.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        self.new_frame_handler = new_frame_handler
 
-    def initialize_camera(self):
-        self.cap = cv2.VideoCapture(0)
-        if not self.cap.isOpened():
-            raise RuntimeError("Error: Unable to access the camera.")
 
-    def release_camera(self):
+        self.need_response = False
+        self.need_response_cond = threading.Condition()
+
+    def exit_handler(self):
         if self.cap is not None:
             self.cap.release()
             self.cap = None
 
-    def set_text_overlay(self, text):
-        self.text_overlay = text
+    def need_new_frame(self):
+        with self.need_response_cond:
+            self.need_response = True
+            self.need_response_cond.notify()
 
-    def display_video_feed(self):
-        if self.cap is None:
-            raise RuntimeError("Camera is not initialized.")
-
+    def start_recording(self):
         while True:
-            ret, frame = self.cap.read()
-            if not ret or frame is None:
-                print("Error: Unable to capture video frame.")
-                break
+            print("hello")
+            with self.need_response_cond:
+                while not self.need_response:
+                    self.need_response_cond.wait()
+                ret, frame = self.cam.read()
+                if not ret:
+                    print("cant parse frame")
+                    break
+                self.new_frame_handler(copy.deepcopy(frame))
+                self.need_response = False
 
-            # Add text overlay to the video frame
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            position = (50, 50)
-            font_scale = 1
-            font_color = (0, 255, 0)
-            thickness = 10
 
-            cv2.putText(frame, self.text_overlay, position, font, font_scale, font_color, thickness)
-            cv2.imshow('Video Feed', frame)
 
-            # Exit on 'q'
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+                
+if __name__ == "__main__":
+    def print_type(x):
+        print(x.shape)
+        cv2.imshow("hello", x)
+        cv2.waitKey(1)
+        cv2.waitKeyEx(1)
 
-        self.release_camera()
-        cv2.destroyAllWindows()
+    a = OpenCVCamera(0, 720, 1280, 30.0 ,print_type)
+    cam_thread = threading.Thread(target = a.start_recording, daemon = True)
+    cam_thread.start()
+    while True:
+        a.need_new_frame()
+    
+    
+                
+
+            

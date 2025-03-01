@@ -1,3 +1,4 @@
+import base64
 import time
 import traceback
 import threading
@@ -16,6 +17,10 @@ NUMBER_OF_OPTIONS = 3 #this should be 4
 def generate_person_a_prompt(voice_rec_input: str, kbd_input: str):
     return f"Person A says: \"{voice_rec_input}\"." \
         f"Keywords for Person B are: {kbd_input}. "
+
+def encode_image(image_path: str):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")
 
 
 class ChatGPTAPI():

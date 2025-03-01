@@ -88,7 +88,7 @@ class OptionComponent():
                  line_width: int,
                  bot_left: Tuple[int, int],
                  progress_100_callback: Callable,
-                 progress_speed=2,
+                 progress_speed=1,
                  value = None):
         """
         bot_left means the bottom left of where the intended string is
@@ -453,7 +453,7 @@ class GUIClass():
                 break
             
     def render_mediapipe(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
-        if not self.black:
+        if True:
             self.canvas = cv2.flip(self.canvas, 1)
             mp_drawing_utils.draw_gesture_and_landmarks_on_image(
             self.canvas,
