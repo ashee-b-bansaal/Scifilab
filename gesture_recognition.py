@@ -1,3 +1,4 @@
+from collections import deque, Counter
 import copy
 import queue
 import threading
@@ -11,7 +12,7 @@ from typing import Callable
 import mp_drawing_utils
 
 
-with open('./keypoint_classifier/keypoint_classifier_new_label.csv',
+with open('./keypoint_classifier/keypoint_5_digit_and_ok_classifier_label.csv',
               encoding='utf-8-sig') as f:
             keypoint_classifier_labels_f = csv.reader(f)
             keypoint_classifier_labels = [
@@ -104,6 +105,8 @@ class GestureRecognition:
         self.frames_q: queue.Queue = queue.Queue()
 
         self.event_subscribers : dict[str, dict[str, Callable]] = dict()
+        self.history_len = 8
+        self.prediction_history: deque = deque(maxlen=self.history_len)
 
     def new_frame_handler(self, frame):
         self.frames_q.put_nowait(copy.deepcopy(frame))
@@ -134,7 +137,7 @@ class GestureRecognition:
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = self.hands.process(frame_rgb)
                 if results.multi_hand_landmarks is not None:
-                    for hand_landmarks, handedness in zip(results.multi_hand_landmarks,                                                          results.multi_handedness):
+                    for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
                         # Bounding box calculation
                         brect = calc_bounding_rect(frame, hand_landmarks)
                         # Landmark calculation
@@ -147,15 +150,18 @@ class GestureRecognition:
                         hand_sign_id = self.keypoint_classifier(pre_processed_landmark_list)
 
                         hand_sign = keypoint_classifier_labels[hand_sign_id]
+                        self.prediction_history.append(hand_sign)
+                        most_common_pred = Counter(
+                                    self.prediction_history).most_common()[0][0]
                         self.notify_event_subscriber(
                             "finished_processing_frame",
                             "gui",
-                            self.draw_bounding_rectangle, brect, hand_sign, landmark_list
+                            self.draw_bounding_rectangle, brect, most_common_pred, landmark_list
                         )
                         self.need_response = False
 
 if __name__ == "__main__":
-    cam = cv2.VideoCapture(4)
+    cam = cv2.VideoCapture(0)
     cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cam.set(cv2.CAP_PROP_FPS, 30.0)
@@ -178,6 +184,7 @@ if __name__ == "__main__":
             brect,
             hand_sign,
             landmark_list)
+        print(hand_sign)
         render_ready["mp"] = True
         
     

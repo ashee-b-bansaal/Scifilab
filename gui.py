@@ -1,3 +1,5 @@
+import sys
+from camera_module import OpenCVCamera
 import linecache
 import gc
 from datetime import datetime
@@ -22,7 +24,7 @@ from tts import TTS, Emotions
 from events import *
 import tracemalloc
 import mp_drawing_utils
-from gesture_recognition import hand_sign_to_index, GestureRecognition
+from gesture_recognition import GestureRecognition
 
 def delete_contents_folder(folder: str):
     """
@@ -135,6 +137,7 @@ class OptionComponent():
         # if is_selected == True then we continously increase progress
         # by progress_speed since original_selection_time, until it hits 100
         self.is_selected = False
+        self.is_hovered_over = False
         self.original_selection_time = 0
 
         self.register_event_subscriber(
@@ -145,6 +148,14 @@ class OptionComponent():
             self.bold()
         else:
             self.unbold()
+
+        if self.is_hovered_over:
+            self.bold()
+            self.color =  (0, 0, 255)
+        else:
+            self.color =  (0, 255, 0)
+            self.unbold()
+        
         for i in range(len(self.text_list)):
             cv2.putText(
                 canvas,
@@ -214,10 +225,21 @@ class OptionComponent():
 
     def unbold(self):
         self.thickness = 1
+    def select(self):
+        self.is_selected = True
+    def unselect(self):
+        self.is_selected = False
 
+    def hover(self):
+        self.is_hovered_over = True
+    def unhover(self):
+        self.is_hovered_over = False
+        
     def reset(self):
         self.selection_progress = 0
         self.unbold()
+        self.unselect()
+        self.unhover()
 
 
 def _normalized_to_pixel_coordinates(normalized_x: float,
@@ -298,7 +320,38 @@ class GUIClass():
 
     """
 
-    def __init__(self, exit_event: threading.Event, fullscreen=False, black=False) -> None:
+    def __init__(self,
+                 exit_event: threading.Event,
+                 hand_cam: OpenCVCamera,
+                 interaction_cam = None,
+                 fullscreen=False,
+                 black=False,
+                 ) -> None:
+        
+        self.interaction_cam = interaction_cam
+        self.hand_cam = hand_cam
+        if self.interaction_cam is not None and self.hand_cam is None:
+            print("must have hand_cam")
+            sys.exit(0)
+        self.num_cam = 0
+        if self.interaction_cam is not None:
+            self.num_cam += 1
+        if self.hand_cam is not None:
+            self.num_cam += 1
+
+        if self.num_cam != 1 and self.num_cam != 2:
+            print("must have either 1 or 2 cameras")
+            sys.exit()
+        # self.interaction_cam = OpenCVCamera(0, 480, 640, 30.0)
+        # self.hand_cam = OpenCVCamera(4, 720, 1280, 30.0)
+
+        if self.num_cam == 1:
+            self.frame_width = int(self.hand_cam.cam_width)
+            self.frame_height = int(self.hand_cam.cam_height)
+        elif self.num_cam == 2:
+            self.frame_width = int(self.interaction_cam.cam_width)
+            self.frame_height = int(self.interaction_cam.cam_height)
+    
         self.black = black
         
         self.fullscreen = fullscreen
@@ -320,8 +373,8 @@ class GUIClass():
         # canvas to draw everything on, in the render method,
         # this should be updated as the camera read frames.
         self.canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
-        self.frame_height = -1
-        self.frame_width = -1
+        # self.frame_height = -1
+        # self.frame_width = -1
 
         # if exit_event is set then must end.
         self.exit_event = exit_event
@@ -332,7 +385,7 @@ class GUIClass():
 
         # variables for llm rendering
         self.llm_options: list[OptionComponent] = []
-        self.selected_llm_option_index = 0
+        self.selected_llm_option_index = -1
         self.number_of_llm_options = 3
 
         self.emotion_options: list[OptionComponent] = [
@@ -362,7 +415,7 @@ class GUIClass():
                             self.emotion_progress_full_handler, value=Emotions.ANGRY)
         ]
         
-        self.selected_emotion_option_index = 0
+        self.selected_emotion_option_index = -1
         self.number_of_emotion_options = 5
         
         self.voice_rec_text_component: VoiceRecTextComponent = VoiceRecTextComponent(
@@ -418,24 +471,30 @@ class GUIClass():
             pass
 
     def render(self):
-        cam = cv2.VideoCapture(4)
-        cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        cam.set(cv2.CAP_PROP_FPS, 30.0)
-        cam.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        self.frame_width = int(cam.get(cv2.CAP_PROP_FRAME_WIDTH))
-        self.frame_height = int(cam.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        print(self.frame_width)
+
         while True:
-            ret, frame = cam.read()
+            if self.num_cam == 2:
+                ret_1, hand_frame = self.hand_cam.read()
+                ret_2, interaction_frame = self.interaction_cam.read()
+                if not ret_1 or not ret_2:
+                    print("can't parse frame")
+                    break
+            elif self.num_cam == 1:
+                ret, hand_frame = self.hand_cam.read()
+                if not ret:
+                    print("can't parse frame")
+                    break
             if self.black:
                 self.canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
             else:
-                self.canvas = frame
-            if not ret:
-                print("can't parse frame")
-                break
-            self.notify_subscriber("new-frame-to-process",cv2.flip( frame, 1))
+                if self.num_cam == 1:
+                    self.canvas = hand_frame
+                elif self.num_cam == 2:
+                    self.canvas = interaction_frame
+                    
+
+            # self.notify_subscriber("new-frame-to-process", cv2.flip(hand_frame, 1))
+            self.notify_subscriber("new-frame-to-process", hand_frame)
             self.update_canvas()
             self.notify_subscriber(
                 "new-frame-to-record", self.canvas)
@@ -453,50 +512,67 @@ class GUIClass():
                 break
             
     def render_mediapipe(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
-        if True:
-            self.canvas = cv2.flip(self.canvas, 1)
-            mp_drawing_utils.draw_gesture_and_landmarks_on_image(
-            self.canvas,
-            draw_bounding_rectangle,
-            brect,
-            hand_sign,
-            landmark_list)
-            self.canvas = cv2.flip(self.canvas, 1)
-        cv2.putText(self.canvas, f"Number:{hand_sign}", (900, 700), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        mp_drawing_utils.draw_gesture_and_landmarks_on_image(
+        self.canvas,
+        draw_bounding_rectangle,
+        brect,
+        hand_sign,
+        landmark_list)
+        cv2.putText(self.canvas, f"Number:{hand_sign}", (self.frame_width - 250, self.frame_height), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
         
     def mediapipe_callback_handler(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
-        # print(result.hand_landmarks)
         
         self.render_functions["mediapipe"] = lambda: self.render_mediapipe(draw_bounding_rectangle, brect, hand_sign, landmark_list)
-    
-        # lambda: mp_drawing_utils.draw_gesture_and_landmarks_on_image(
-        #     self.canvas,
-        #     draw_bounding_rectangle,
-        #     brect,
-        #     hand_sign,
-        #     landmark_list)
+
         self.render_ready["mediapipe"] = True
-        if self.render_ready["llm-options"]:
-            self.update_selected_llm_option_mp(hand_sign)
-        if self.render_ready["emotion_options"]:
-            self.update_selected_emotion_option_mp(hand_sign)
+        if hand_sign == "OK":
+            if self.render_ready["emotion_options"] and self.selected_emotion_option_index >=0 and self.selected_emotion_option_index < self.number_of_emotion_options:
+                print(hand_sign)
+                # self.emotion_options[self.selected_emotion_option_index].select()
+                # self.emotion_options[self.selected_emotion_option_index].update_progress()
+                for i in range(self.number_of_emotion_options):
+                    if i == self.selected_emotion_option_index:
+                        self.emotion_options[i].select()
+                    else:
+                        self.emotion_options[i].unselect()
+            if self.render_ready["llm-options"] and self.selected_llm_option_index >=0 and self.selected_llm_option_index < self.number_of_llm_options:
+                for i in range(self.number_of_llm_options):
+                    if i == self.selected_llm_option_index:
+                        self.llm_options[i].select()
+                    else:
+                        self.llm_options[i].unselect()
+
+        else:
+            for i in range(len(self.llm_options)):
+                self.llm_options[i].unselect()
+            for i in range(self.number_of_emotion_options):
+                self.emotion_options[i].unselect()
+            if self.render_ready["llm-options"]:
+                self.update_selected_llm_option_mp(hand_sign)
+            if self.render_ready["emotion_options"]:
+                self.update_selected_emotion_option_mp(hand_sign)
         
     ## LLM OPTIONS CODE SECTION
     def update_selected_llm_option_mp(self, hand_sign: str):
-        if int(hand_sign) <= 4:
+        if int(hand_sign) <= self.number_of_llm_options:
             self.selected_llm_option_index = int(hand_sign) - 1
+            for i in range(self.number_of_llm_options):
+                if i == self.selected_llm_option_index:
+                    self.llm_options[i].hover()
+                else:
+                    self.llm_options[i].unhover()
         else:
             print("wtf")
 
             
     def render_llm_options(self):
         for i in range(len(self.llm_options)):
-            if i == self.selected_llm_option_index:
-                self.llm_options[i].is_selected = True
-                self.llm_options[i].color = (0, 0, 255)
-            else:
-                self.llm_options[i].is_selected = False
-                self.llm_options[i].color = (0, 255, 0)
+            # if i == self.selected_llm_option_index:
+                # self.llm_options[i].is_selected = True
+                # self.llm_options[i].color = (0, 0, 255)
+            # else:
+                # self.llm_options[i].is_selected = False
+                # self.llm_options[i].color = (0, 255, 0)
 
             self.llm_options[i].update_progress()
             self.llm_options[i].render_component(self.canvas)
@@ -534,18 +610,19 @@ class GUIClass():
             self.notify_subscriber(
                 "done_choosing_llm_option",
                 copy.deepcopy(self.llm_options[self.selected_llm_option_index].text))
+            self.selected_llm_option_index = -1
             self.render_ready["llm-options"] = False
             self.render_ready["emotion_options"] = True
 
 
     def render_emotion_options(self):
         for i in range(self.number_of_emotion_options):
-            if i == self.selected_emotion_option_index:
-                self.emotion_options[i].is_selected = True
-                self.emotion_options[i].color = (0, 0, 255)
-            else:
-                self.emotion_options[i].is_selected = False
-                self.emotion_options[i].color = (0, 255, 0)
+            # if i == self.selected_emotion_option_index:
+                # self.emotion_options[i].is_selected = True
+                # self.emotion_options[i].color = (0, 0, 255)
+            # else:
+                # self.emotion_options[i].is_selected = False
+                # self.emotion_options[i].color = (0, 255, 0)
 
             self.emotion_options[i].update_progress()
             self.emotion_options[i].render_component(self.canvas)
@@ -557,12 +634,18 @@ class GUIClass():
                 self.emotion_options[self.selected_emotion_option_index].value
             )
             self.render_ready["emotion_options"] = False
+            self.selected_emotion_option_index = -1
             for i in range(self.number_of_emotion_options):
                 self.emotion_options[i].reset()
             
 
     def update_selected_emotion_option_mp(self, hand_sign: str):
         self.selected_emotion_option_index = int(hand_sign) - 1
+        for i in range(self.number_of_emotion_options):
+            if i == self.selected_emotion_option_index:
+                self.emotion_options[i].hover()
+            else:
+                self.emotion_options[i].unhover()
 
     
     def voice_input_ready_handler(self, text: str):
@@ -709,9 +792,14 @@ if __name__ == "__main__":
     video_recorder = VideoRecorder(video_path, video_filename)
 
     exit_event: threading.Event = threading.Event()
+    hand_cam = OpenCVCamera(0, 720, 1280, 30.0)
+    # interaction_cam = OpenCVCamera(0, 480, 640, 30.0)
+
     gui: GUIClass = GUIClass(exit_event=exit_event,
                              fullscreen=args.fullscreen,
-                             black=args.black)
+                             black=args.black,
+                             hand_cam = hand_cam
+                             )
     print(args.fullscreen)
     voice_rec: VoiceRecognition = VoiceRecognition(input_device_index=args.input_index)
 

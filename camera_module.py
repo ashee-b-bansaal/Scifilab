@@ -10,9 +10,11 @@ class OpenCVCamera():
                  cam_height: int,
                  cam_width: int,
                  cam_fps: float,
-                 new_frame_handler: Callable) -> None:
+                 new_frame_handler: Callable = lambda x: x) -> None:
         self.source_index = source_index
         self.cam = cv2.VideoCapture(self.source_index)
+        self.cam_height = cam_height
+        self.cam_width = cam_width
         self.cam.set(cv2.CAP_PROP_FRAME_HEIGHT, cam_height)
         self.cam.set(cv2.CAP_PROP_FRAME_WIDTH, cam_width) 
         self.cam.set(cv2.CAP_PROP_FPS, cam_fps)
@@ -23,10 +25,10 @@ class OpenCVCamera():
         self.need_response = False
         self.need_response_cond = threading.Condition()
 
-    def exit_handler(self):
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
+    def read(self):
+        return self.cam.read()
+
+    # the 2 functions below are for multithreading purposes
 
     def need_new_frame(self):
         with self.need_response_cond:

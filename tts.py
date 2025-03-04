@@ -19,7 +19,7 @@ load_dotenv()
 AZURE_SPEECH_KEY = os.getenv('AZURE_SPEECH_KEY')
 
 class Emotions(Enum):
-    SAD="depressed"
+    SAD="sad"
     HAPPY="cheerful"
     NEUTRAL="neutral"
     ANGRY="angry"
@@ -82,10 +82,10 @@ if __name__ == "__main__":
     a = TTS(lambda: print("done"), gender="female")
     tts_thread: threading.Thread = threading.Thread(target = a.start_tts, daemon=True)
     tts_thread.start()
-    a.add_tts_handler(Emotions.SAD,"i'm very sad")
+    a.add_tts_handler(Emotions.SAD,"The dog is running")
     time.sleep(2)
 
-    a.add_tts_handler(Emotions.HAPPY,"the weather is so nice today")
+    a.add_tts_handler(Emotions.ANGRY,"the weather is so nice today")
     time.sleep(5)
     print("done")
 
