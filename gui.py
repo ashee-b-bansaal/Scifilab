@@ -720,6 +720,14 @@ if __name__ == "__main__":
         "--input_index",
         help="audio input index, based on list_audio_indices.py"
     )
+    parser.add_argument(
+        "-l",
+        "--level",
+        help = "select level. Level 1 means 1 sign, level 2 means 3 signs, level 3 means full sentence",
+        choices = ["1", "2", "3"],
+        default = "1"
+    )
+    
 
     args = parser.parse_args()
 
@@ -775,6 +783,9 @@ if __name__ == "__main__":
     debug_handler.setLevel(logging.DEBUG)
     debug_handler.setFormatter(formatter)
     logger.addHandler(debug_handler)
+
+    logger.info(f"Level: {args.level}")
+
 
     ### start declaring the different components
     video_recorder = VideoRecorder(video_path, video_filename)

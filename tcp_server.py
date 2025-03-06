@@ -1,3 +1,4 @@
+import queue
 import logging
 import socket
 from typing import Callable
@@ -15,8 +16,7 @@ class TCPServer():
         self.ip_address = ip_address
         self.port = port
         self.event_subscribers : dict[Events, dict[str, Callable]] = dict()
-        
-    
+
     def register_event_subscriber(self,
                                   event: Events,
                                   subscriber_name: str, fn: Callable):
