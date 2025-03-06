@@ -1,18 +1,17 @@
+import logging
 import sys
 from camera_module import OpenCVCamera
 import linecache
-import gc
 from datetime import datetime
 import os
 import shutil
 import argparse
 import copy
-import time
 import cv2
 import numpy as np
 import threading
 import math
-from typing import Callable, List, Mapping, Optional, Tuple, Union
+from typing import Callable, Tuple, Union
 from voice_recognition import VoiceRecognition
 import textwrap
 from kbd_input import KeyboardInput
@@ -21,7 +20,7 @@ from chatgpt_api import ChatGPTAPI
 from android_input import AndroidInput
 from tcp_server import TCPServer
 from tts import TTS, Emotions
-from events import *
+from events import TCPServerEvents, AndroidInputEvents
 import tracemalloc
 import mp_drawing_utils
 from gesture_recognition import GestureRecognition
@@ -262,55 +261,6 @@ def _normalized_to_pixel_coordinates(normalized_x: float,
     return x_px, y_px
 
 
-def hand_highest_point(detection_result, image_cols, image_rows):
-    highest_pixel_pos = 100000
-    hand_landmarks_list = detection_result.hand_landmarks
-
-    for idx in range(len(hand_landmarks_list)):
-        hand_landmarks = hand_landmarks_list[idx]
-        hand_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
-        hand_landmarks_proto.landmark.extend([
-            landmark_pb2.NormalizedLandmark(x=landmark.x, y=landmark.y, z=landmark.z) for landmark in hand_landmarks
-        ])
-
-        landmark_px_list = [_normalized_to_pixel_coordinates(
-            landmark.x, landmark.y, image_cols, image_rows) for landmark in hand_landmarks_proto.landmark]
-        for px in landmark_px_list:
-            if px is not None:
-                w, h = px
-                highest_pixel_pos = min(highest_pixel_pos, h)
-    if highest_pixel_pos == 100000:
-        return None
-    return highest_pixel_pos
-
-
-def draw_landmarks_on_image(rgb_image, detection_result):
-    hand_landmarks_list = detection_result.hand_landmarks
-    handedness_list = detection_result.handedness
-
-    # Loop through the detected hands to visualize.
-    for idx in range(len(hand_landmarks_list)):
-        hand_landmarks = hand_landmarks_list[idx]
-
-        # Draw the hand landmarks.
-        hand_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
-        hand_landmarks_proto.landmark.extend([
-            landmark_pb2.NormalizedLandmark(x=landmark.x, y=landmark.y, z=landmark.z) for landmark in hand_landmarks
-        ])
-        solutions.drawing_utils.draw_landmarks(
-            rgb_image,
-            hand_landmarks_proto,
-            solutions.hands.HAND_CONNECTIONS,
-            solutions.drawing_styles.get_default_hand_landmarks_style(),
-            solutions.drawing_styles.get_default_hand_connections_style())
-        # Get the top left corner of the detected hand's bounding box.
-        hand_high = hand_highest_point(
-            detection_result, rgb_image.shape[1], rgb_image.shape[0])
-
-        cv2.line(rgb_image, (0, hand_high),
-                 (1300, hand_high), (0, 0, 255), thickness=2)    
-
-
 class GUIClass():
     """
     The GUI class is responsible for displaying the GUI.
@@ -323,10 +273,12 @@ class GUIClass():
     def __init__(self,
                  exit_event: threading.Event,
                  hand_cam: OpenCVCamera,
+                 logger: logging.Logger,
                  interaction_cam = None,
                  fullscreen=False,
                  black=False,
                  ) -> None:
+        self.logger = logger
         
         self.interaction_cam = interaction_cam
         self.hand_cam = hand_cam
@@ -471,7 +423,7 @@ class GUIClass():
             pass
 
     def render(self):
-
+        self.logger.debug("start rendering program")
         while True:
             if self.num_cam == 2:
                 ret_1, hand_frame = self.hand_cam.read()
@@ -521,13 +473,15 @@ class GUIClass():
         cv2.putText(self.canvas, f"Number:{hand_sign}", (self.frame_width - 250, self.frame_height), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
         
     def mediapipe_callback_handler(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
+        # self.logger.debug(f"mediapipe classify user gestures: {hand_sign}")
         
         self.render_functions["mediapipe"] = lambda: self.render_mediapipe(draw_bounding_rectangle, brect, hand_sign, landmark_list)
 
         self.render_ready["mediapipe"] = True
         if hand_sign == "OK":
             if self.render_ready["emotion_options"] and self.selected_emotion_option_index >=0 and self.selected_emotion_option_index < self.number_of_emotion_options:
-                print(hand_sign)
+                # print(hand_sign)
+                # self.logger.debug(f"user is selecting emotion index:  {self.selected_emotion_option_index}")
                 # self.emotion_options[self.selected_emotion_option_index].select()
                 # self.emotion_options[self.selected_emotion_option_index].update_progress()
                 for i in range(self.number_of_emotion_options):
@@ -536,6 +490,7 @@ class GUIClass():
                     else:
                         self.emotion_options[i].unselect()
             if self.render_ready["llm-options"] and self.selected_llm_option_index >=0 and self.selected_llm_option_index < self.number_of_llm_options:
+                # self.logger.debug(f"user is selecting llm index:  {self.selected_emotion_option_index}")
                 for i in range(self.number_of_llm_options):
                     if i == self.selected_llm_option_index:
                         self.llm_options[i].select()
@@ -582,6 +537,8 @@ class GUIClass():
         line_width = 36
         llm_options = [rep for rep in response.splitlines() if len(
             rep) > 2 and rep[0].isdigit()]
+        self.logger.info(f"the options sent by the llm are {llm_options}")
+
         self.llm_options.clear()
         for i in range(len(llm_options)):
             if i == 0:
@@ -602,6 +559,7 @@ class GUIClass():
 
     def llm_progress_full_handler(self):
         if self.render_ready['llm-options']:
+            self.logger.info(f"the user chooses llm option: {self.llm_options[self.selected_llm_option_index].text}")
             self.notify_subscriber(
                 "llm-add-prompt",
                 "B",
@@ -629,6 +587,7 @@ class GUIClass():
 
     def emotion_progress_full_handler(self):
         if self.render_ready['emotion_options']:
+            self.logger.info(f"the user chooses emotion option: {self.emotion_options[self.selected_emotion_option_index].value}")
             self.notify_subscriber(
                 "done_choosing_emotion_option",
                 self.emotion_options[self.selected_emotion_option_index].value
@@ -649,6 +608,7 @@ class GUIClass():
 
     
     def voice_input_ready_handler(self, text: str):
+        self.logger.info(f"the hearing person says this: {text}")
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = VoiceRecTextComponent(
             text, 25, (10, self.canvas.shape[0] - 10))
@@ -705,7 +665,11 @@ def display_top(snapshot, key_type='lineno', limit=15):
     total = sum(stat.size for stat in top_stats)
     print("Total allocated size: %.1f KiB" % (total / 1024))
 
+    
 if __name__ == "__main__":
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)
+    
     tracemalloc.start()
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -784,11 +748,35 @@ if __name__ == "__main__":
         os.mkdir(args.path)
         os.mkdir(os.path.join(args.path, "video"))
 
+
+
+    ### initialize the files and folders
     folder_path = args.path
     video_path = os.path.join(args.path, "video")
-    time_rn = datetime.now().strftime("%H_%M_%S")
+    time_rn = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
     video_filename = f"video_{time_rn}.mp4"
 
+    # interaction log will log the non technical details of the interaction
+    # will log
+    # - what the llm choices are,
+    # - what the DHH person chooses,
+    # - what the hearing person says (voice rec)
+    # - what the interpreter sends
+    interaction_handler = logging.FileHandler(os.path.join(folder_path, f'interaction_log_{time_rn}.txt'))
+    interaction_handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s-%(levelname)s-%(message)s')
+
+    interaction_handler.setFormatter(formatter)
+    logger.addHandler(interaction_handler)
+
+    # debug log logs everything, when the threads recieve what, .... It is a superset of the
+    # interaction log
+    debug_handler = logging.FileHandler(os.path.join(folder_path, f'debug_log_{time_rn}.txt'))
+    debug_handler.setLevel(logging.DEBUG)
+    debug_handler.setFormatter(formatter)
+    logger.addHandler(debug_handler)
+
+    ### start declaring the different components
     video_recorder = VideoRecorder(video_path, video_filename)
 
     exit_event: threading.Event = threading.Event()
@@ -798,17 +786,25 @@ if __name__ == "__main__":
     gui: GUIClass = GUIClass(exit_event=exit_event,
                              fullscreen=args.fullscreen,
                              black=args.black,
-                             hand_cam = hand_cam
+                             hand_cam = hand_cam,
+                             logger=logger
                              )
     print(args.fullscreen)
-    voice_rec: VoiceRecognition = VoiceRecognition(input_device_index=args.input_index)
+    voice_rec: VoiceRecognition = VoiceRecognition(
+        input_device_index=args.input_index,
+        logger=logger)
 
-    llm: ChatGPTAPI = ChatGPTAPI()
-    tts: TTS = TTS(finished_speaking_handler=voice_rec.voice_start_handler, gender=args.voice_gender,output_device_index=args.output_index)
-    gesture_rec: GestureRecognition = GestureRecognition()
+    llm: ChatGPTAPI = ChatGPTAPI(logger=logger)
+    tts: TTS = TTS(
+        finished_speaking_handler=voice_rec.voice_start_handler,
+        gender=args.voice_gender,
+        output_device_index=args.output_index,
+        logger=logger)
+    gesture_rec: GestureRecognition = GestureRecognition(
+        logger=logger)
     
     if args.word_input == "keyboard":
-        keyboard_input = KeyboardInput()
+        keyboard_input = KeyboardInput(logger=logger)
 
         keyboard_input.register_event_subscriber("keyboard_input_ready",
                                              "llm",
@@ -823,8 +819,8 @@ if __name__ == "__main__":
         )
         keyboard_input_thread.start()
     elif args.word_input == "android":
-        tcp_serv = TCPServer()
-        android_input = AndroidInput()
+        tcp_serv = TCPServer(logger=logger)
+        android_input = AndroidInput(logger=logger)
         tcp_serv.register_event_subscriber(
             TCPServerEvents.MSG_RECEIVED,
             "android_input",

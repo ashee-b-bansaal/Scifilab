@@ -1,10 +1,12 @@
+import logging
 from typing import Callable
 import threading
 import queue
 
 
 class KeyboardInput():
-    def __init__(self) -> None:
+    def __init__(self, logger: logging.Logger) -> None:
+        self.logger = logger
         self.event_subscribers : dict[str, dict[str, Callable]] = dict()
         self.need_response_cond : threading.Condition = threading.Condition()
         self.need_response = False

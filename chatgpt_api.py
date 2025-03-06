@@ -1,3 +1,4 @@
+import logging
 import base64
 import time
 import traceback
@@ -28,7 +29,7 @@ def encode_image(image):
     return encoded_img
     
 class ChatGPTAPI():
-    def __init__(self, model: str = "gpt-4o-mini", use_surrounding_context: bool = False):
+    def __init__(self, logger: logging.Logger, model: str = "gpt-4o-mini", use_surrounding_context: bool = False):
         self.use_surrounding_context = use_surrounding_context
         self.model = model
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()

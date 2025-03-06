@@ -1,3 +1,4 @@
+import logging
 import time
 import queue
 import threading
@@ -12,7 +13,8 @@ class AndroidInput():
     if not then send to llm.
     message queue is filled using tcp server
     """
-    def __init__(self) -> None:
+    def __init__(self, logger: logging.Logger) -> None:
+        self.logger = logger
         self.event_subscribers : dict[Events, dict[str, Callable]] = dict()
         self.need_response_cond : threading.Condition = threading.Condition()
         self.need_response = False
@@ -55,6 +57,7 @@ class AndroidInput():
                 while not self.need_response or self.msg_q.empty():
                     self.need_response_cond.wait()
                 msg: str = self.msg_q.get_nowait()
+                self.logger.info(f"the android phone sent this: {msg}")
                 self.notify_event_subscriber(
                     AndroidInputEvents.INPUT_READY,
                     "llm",
@@ -65,8 +68,9 @@ class AndroidInput():
 
             
 if __name__ == "__main__":
-    t = TCPServer()
-    a = AndroidInput()
+    logger = logging.getLogger(__name__)
+    t = TCPServer(logger)
+    a = AndroidInput(logger)
     t.register_event_subscriber(
         TCPServerEvents.MSG_RECEIVED,
         "android_input",

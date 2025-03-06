@@ -1,3 +1,4 @@
+import logging
 import socket
 from typing import Callable
 from events import Events, TCPServerEvents
@@ -9,7 +10,8 @@ PORT = 5432
 
 
 class TCPServer():
-    def __init__(self, ip_address: str = IP, port: int = PORT):
+    def __init__(self, logger: logging.Logger, ip_address: str = IP, port: int = PORT):
+        self.logger = logger
         self.ip_address = ip_address
         self.port = port
         self.event_subscribers : dict[Events, dict[str, Callable]] = dict()
@@ -52,7 +54,8 @@ class TCPServer():
     
                         
 if __name__ == "__main__":
-    t = TCPServer()
+    logger = logging.getLogger(__name__)
+    t = TCPServer(logger)
     t.start_server()
             
             

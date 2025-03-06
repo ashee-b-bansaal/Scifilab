@@ -1,3 +1,4 @@
+import logging
 import queue
 import logging
 from RealtimeTTS import TextToAudioStream, SystemEngine, AzureEngine, ElevenlabsEngine, GTTSEngine
@@ -29,7 +30,8 @@ class Emotions(Enum):
 
 
 class TTS():
-    def __init__(self, finished_speaking_handler: Callable, output_device_index=None,gender="female"):
+    def __init__(self, finished_speaking_handler: Callable, logger: logging.Logger, output_device_index=None,gender="female"):
+        self.logger = logger
         self.tts_q: queue.Queue = queue.Queue()
         self.voice= FEMALE_VOICE if gender=="female" else MALE_VOICE
         self.need_tts: bool = False
@@ -73,13 +75,16 @@ class TTS():
                     self.tts_stream.feed(text)
                     self.tts_stream.play()
                     self.need_tts = False
+                    self.logger.info(f"the tts spoke '{text}' with emotion '{emotion}'")
+                    
         except:
             traceback.print_exc()
 
             
     
 if __name__ == "__main__":
-    a = TTS(lambda: print("done"), gender="female")
+    logger = logging.getLogger(__name__)
+    a = TTS(lambda: print("done"), gender="female", logger=logger)
     tts_thread: threading.Thread = threading.Thread(target = a.start_tts, daemon=True)
     tts_thread.start()
     a.add_tts_handler(Emotions.SAD,"The dog is running")

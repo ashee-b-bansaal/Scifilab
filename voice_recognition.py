@@ -1,3 +1,4 @@
+import logging
 import speech_recognition as sr
 import threading
 from typing import Callable
@@ -5,9 +6,11 @@ import traceback
 
 
 class VoiceRecognition():
-    def __init__(self, input_device_index=None) -> None:
+    def __init__(self,
+                 logger: logging.Logger,
+                 input_device_index: int = -1) -> None:
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()
-
+        self.logger = logger
         # the voice recognition thread should sleep (wait) until
         # the gui thread notify it that it needs voice recogintion
         self.need_recording_cond: threading.Condition = threading.Condition()

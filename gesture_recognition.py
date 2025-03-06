@@ -1,3 +1,4 @@
+import logging
 from collections import deque, Counter
 import copy
 import queue
@@ -88,7 +89,7 @@ def pre_process_landmark(landmark_list):
 
 
 class GestureRecognition:
-    def __init__(self) -> None:
+    def __init__(self, logger: logging.Logger) -> None:
         self.keypoint_classifier = KeyPointClassifier()
         mp_hands = mp.solutions.hands
         self.hands = mp_hands.Hands(
