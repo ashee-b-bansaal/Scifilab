@@ -18,12 +18,33 @@ from kbd_input import KeyboardInput
 from video_recorder import VideoRecorder
 from chatgpt_api import ChatGPTAPI
 from android_input import AndroidInput
-from tcp_server import TCPServer
+from tcp_server import TCPServer, IP, PORT
 from tts import TTS, Emotions
 from events import TCPServerEvents, AndroidInputEvents
 import tracemalloc
 import mp_drawing_utils
 from gesture_recognition import GestureRecognition
+
+
+class TCPServerHandler(logging.Handler):
+    def __init__(self, add_new_msg_callback):
+        super().__init__()
+
+        self.add_new_msg_callback = add_new_msg_callback
+    
+    def emit(self, record):
+        """
+        Add the formatted log record to the queue.
+        
+        Args:
+            record (LogRecord): The log record to process.
+        """
+        try:
+            msg = self.format(record)
+            self.add_new_msg_callback(msg)
+        except Exception:
+            self.handleError(record)
+
 
 def delete_contents_folder(folder: str):
     """
@@ -324,7 +345,7 @@ class GUIClass():
 
         # canvas to draw everything on, in the render method,
         # this should be updated as the camera read frames.
-        self.canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+        self.canvas = np.zeros((self.frame_height, self.frame_width, 3), dtype=np.uint8)
         # self.frame_height = -1
         # self.frame_width = -1
 
@@ -338,7 +359,7 @@ class GUIClass():
         # variables for llm rendering
         self.llm_options: list[OptionComponent] = []
         self.selected_llm_option_index = -1
-        self.number_of_llm_options = 3
+        self.number_of_llm_options = 5
 
         self.emotion_options: list[OptionComponent] = [
             OptionComponent("SAD",
@@ -373,6 +394,7 @@ class GUIClass():
         self.voice_rec_text_component: VoiceRecTextComponent = VoiceRecTextComponent(
             "", 36, (0, 0))
 
+
     def register_subscriber(self, subscriber_name: str, fn: Callable):
         self.subscribers[subscriber_name] = fn
 
@@ -386,13 +408,14 @@ class GUIClass():
         self.render_functions[component_name] = component_render_fn
         self.render_ready[component_name] = False
 
-    def update_canvas(self):
+    def update_canvas(self, canvas: np.ndarray):
         """
-        draws everything on canvas
+        draws everything on specified canvas
         """
         for ui_element in self.render_order:
             if self.render_ready[ui_element]:
-                self.render_functions[ui_element]()
+                self.render_functions[ui_element](canvas)
+        
 
     def handle_input(self):
         pressed_key = cv2.waitKeyEx(1) & 0xFF
@@ -436,20 +459,36 @@ class GUIClass():
                 if not ret:
                     print("can't parse frame")
                     break
+
+            if hand_frame.shape[0] != self.frame_height or hand_frame.shape[1] != self.frame_width:
+                hand_frame = cv2.resize(hand_frame, (self.frame_width, self.frame_height), interpolation=cv2.INTER_LINEAR)
+            if self.num_cam == 2:
+                if interaction_frame.shape[0] != self.frame_height or interaction_frame.shape[1] != self.frame_width:
+                    interaction_frame = cv2.resize(interaction_frame, (self.frame_width, self.frame_height), interpolation=cv2.INTER_LINEAR)
+            
             if self.black:
-                self.canvas = np.zeros((720, 1280, 3), dtype=np.uint8)
+                self.canvas = np.zeros((self.frame_height, self.frame_width, 3), dtype=np.uint8)
             else:
                 if self.num_cam == 1:
                     self.canvas = hand_frame
                 elif self.num_cam == 2:
                     self.canvas = interaction_frame
-                    
 
             # self.notify_subscriber("new-frame-to-process", cv2.flip(hand_frame, 1))
             self.notify_subscriber("new-frame-to-process", hand_frame)
-            self.update_canvas()
-            self.notify_subscriber(
-                "new-frame-to-record", self.canvas)
+            self.update_canvas(self.canvas)
+            if self.black:
+                if self.num_cam == 2:
+                    self.update_canvas(interaction_frame)
+                    self.notify_subscriber(
+                        "new-frame-to-record", interaction_frame)
+                else:
+                    self.update_canvas(hand_frame)
+                    self.notify_subscriber(
+                        "new-frame-to-record", hand_frame)
+            else:
+                self.notify_subscriber(
+                    "new-frame-to-record", self.canvas)
             self.handle_input()
             if self.fullscreen:
                 cv2.namedWindow("realtime llm", cv2.WND_PROP_FULLSCREEN)
@@ -459,23 +498,28 @@ class GUIClass():
                 cv2.namedWindow("realtime llm")
                 pass
             cv2.imshow("realtime llm", cv2.resize(
-                (self.canvas), (1920, 1080), interpolation=cv2.INTER_CUBIC))
+                (self.canvas), (1920, 1080), interpolation=cv2.INTER_LINEAR))
             if self.exit_event.is_set():
                 break
             
-    def render_mediapipe(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
+    def render_mediapipe(self, canvas, draw_bounding_rectangle, brect, hand_sign, landmark_list):
         mp_drawing_utils.draw_gesture_and_landmarks_on_image(
-        self.canvas,
+        canvas,
         draw_bounding_rectangle,
         brect,
         hand_sign,
         landmark_list)
-        cv2.putText(self.canvas, f"Number:{hand_sign}", (self.frame_width - 250, self.frame_height), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        cv2.putText(canvas, f"Number:{hand_sign}", (canvas.shape[1] - 250, canvas.shape[0]), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
         
     def mediapipe_callback_handler(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
         # self.logger.debug(f"mediapipe classify user gestures: {hand_sign}")
         
-        self.render_functions["mediapipe"] = lambda: self.render_mediapipe(draw_bounding_rectangle, brect, hand_sign, landmark_list)
+        self.render_functions["mediapipe"] = lambda canvas: self.render_mediapipe(
+            canvas,
+            draw_bounding_rectangle,
+            brect,
+            hand_sign,
+            landmark_list)
 
         self.render_ready["mediapipe"] = True
         if hand_sign == "OK":
@@ -509,18 +553,15 @@ class GUIClass():
         
     ## LLM OPTIONS CODE SECTION
     def update_selected_llm_option_mp(self, hand_sign: str):
-        if int(hand_sign) <= self.number_of_llm_options:
-            self.selected_llm_option_index = int(hand_sign) - 1
-            for i in range(self.number_of_llm_options):
-                if i == self.selected_llm_option_index:
-                    self.llm_options[i].hover()
-                else:
-                    self.llm_options[i].unhover()
-        else:
-            print("wtf")
+        self.selected_llm_option_index = int(hand_sign) - 1
+        for i in range(self.number_of_llm_options):
+            if i == self.selected_llm_option_index:
+                self.llm_options[i].hover()
+            else:
+                self.llm_options[i].unhover()
 
             
-    def render_llm_options(self):
+    def render_llm_options(self, canvas):
         for i in range(len(self.llm_options)):
             # if i == self.selected_llm_option_index:
                 # self.llm_options[i].is_selected = True
@@ -530,7 +571,7 @@ class GUIClass():
                 # self.llm_options[i].color = (0, 255, 0)
 
             self.llm_options[i].update_progress()
-            self.llm_options[i].render_component(self.canvas)
+            self.llm_options[i].render_component(canvas)
 
     def llm_response_handler(self, response: str):
         print("response recieved by gui thread")
@@ -538,8 +579,9 @@ class GUIClass():
         llm_options = [rep for rep in response.splitlines() if len(
             rep) > 2 and rep[0].isdigit()]
         self.logger.info(f"the options sent by the llm are {llm_options}")
-
+        assert(len(llm_options) == self.number_of_llm_options - 1)
         self.llm_options.clear()
+        
         for i in range(len(llm_options)):
             if i == 0:
                 text_bottom_left = (self.frame_width//2, 50 + 100 * i)
@@ -552,11 +594,45 @@ class GUIClass():
                     llm_options[i],
                     line_width,
                     text_bottom_left, self.llm_progress_full_handler))
+        reset_option_bottom_left = (
+            self.llm_options[-1].bot_left_list[-1][0],
+            self.llm_options[-1].bot_left_list[-1][1] + 2 * self.llm_options[-1].line_heights[-1])
+        self.llm_options.append(
+            OptionComponent(
+                "RESET",
+                line_width,
+                reset_option_bottom_left,
+                self.llm_reset_progress_full_handler))
 
         self.render_ready["llm-options"] = True
 
         self.render_ready["voice_rec_text"] = False
 
+    def llm_reset_progress_full_handler(self):
+        if self.render_ready['llm-options']:
+            self.logger.info("reset chose n   bb")
+            self.notify_subscriber(
+                "llm-reset-keywords"
+            )
+            self.notify_subscriber("android-need-input")
+            
+            # if self.selected_llm_option_index != 4:
+            #     self.notify_subscriber(
+            #         "llm-add-prompt",
+            #         "B",
+            #         self.llm_options[self.selected_llm_option_index].text
+            #     )
+            #     self.notify_subscriber(
+            #         "done_choosing_llm_option",
+            #         copy.deepcopy(self.llm_options[self.selected_llm_option_index].text))
+            #     self.selected_llm_option_index = -1
+            self.selected_llm_option_index = -1
+            self.render_ready["llm-options"] = False
+            self.render_ready["keyword_text"] = False
+            # self.render_ready["emotion_options"] = True
+            # else:
+            #     pass
+            
     def llm_progress_full_handler(self):
         if self.render_ready['llm-options']:
             self.logger.info(f"the user chooses llm option: {self.llm_options[self.selected_llm_option_index].text}")
@@ -571,9 +647,9 @@ class GUIClass():
             self.selected_llm_option_index = -1
             self.render_ready["llm-options"] = False
             self.render_ready["emotion_options"] = True
+            self.render_ready["keyword_text"] = False
 
-
-    def render_emotion_options(self):
+    def render_emotion_options(self, canvas):
         for i in range(self.number_of_emotion_options):
             # if i == self.selected_emotion_option_index:
                 # self.emotion_options[i].is_selected = True
@@ -583,8 +659,16 @@ class GUIClass():
                 # self.emotion_options[i].color = (0, 255, 0)
 
             self.emotion_options[i].update_progress()
-            self.emotion_options[i].render_component(self.canvas)
+            self.emotion_options[i].render_component(canvas)
 
+
+    def new_keyword_handler(self, text):
+        self.render_functions["keyword_text"] = lambda canvas: self.render_keyword_text(canvas, text)
+        self.render_ready["keyword_text"] = True
+        
+    def render_keyword_text(self, canvas, text):
+        cv2.putText(canvas, text, (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1.0, (0, 255, 0), 2)
+            
     def emotion_progress_full_handler(self):
         if self.render_ready['emotion_options']:
             self.logger.info(f"the user chooses emotion option: {self.emotion_options[self.selected_emotion_option_index].value}")
@@ -612,8 +696,8 @@ class GUIClass():
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = VoiceRecTextComponent(
             text, 25, (10, self.canvas.shape[0] - 10))
-        self.render_functions["voice_rec_text"] = lambda: self.voice_rec_text_component.render_component(
-            self.canvas)
+        self.render_functions["voice_rec_text"] = lambda canvas: self.voice_rec_text_component.render_component(
+            canvas)
         
     def on_voice_recording_start(self):
         """
@@ -621,8 +705,8 @@ class GUIClass():
         picked up
         """
         self.render_ready["voice-recording-start"] = True
-        self.render_functions["voice-recording-start"] = lambda: cv2.putText(
-            self.canvas,
+        self.render_functions["voice-recording-start"] = lambda canvas: cv2.putText(
+            canvas,
             "Recording Voice",
             (100, 100),
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -636,8 +720,6 @@ class GUIClass():
         removes the Recording Voice text on screen
         """
         self.render_ready["voice-recording-start"] = False
-
-
 
 
 def display_top(snapshot, key_type='lineno', limit=15):
@@ -687,9 +769,9 @@ if __name__ == "__main__":
         "--word-input",
         help="whether to use the keyboard or android phone to input keywords",
         choices = ["keyboard", "android"],
-        default = 'keyboard',
+        default = 'android',
         nargs = "?",
-        const = "keyboard"
+        const = "android"
     )
     parser.add_argument(
         "-b",
@@ -784,23 +866,30 @@ if __name__ == "__main__":
     debug_handler.setFormatter(formatter)
     logger.addHandler(debug_handler)
 
-    logger.info(f"Level: {args.level}")
+
+    # socket_handler = PlainTextTcpHandler(host=IP, port=PORT)
+    # socket_handler.setLevel(logging.INFO)
+    # logger.addHandler(socket_handler)
+    
+    
+
 
 
     ### start declaring the different components
-    video_recorder = VideoRecorder(video_path, video_filename)
+
 
     exit_event: threading.Event = threading.Event()
     hand_cam = OpenCVCamera(0, 720, 1280, 30.0)
-    # interaction_cam = OpenCVCamera(0, 480, 640, 30.0)
+    interaction_cam = OpenCVCamera(2, 480, 640, 30.0)
 
     gui: GUIClass = GUIClass(exit_event=exit_event,
                              fullscreen=args.fullscreen,
                              black=args.black,
                              hand_cam = hand_cam,
+                             interaction_cam=interaction_cam,
                              logger=logger
                              )
-    print(args.fullscreen)
+    video_recorder = VideoRecorder(video_path, video_filename, frame_size=(gui.frame_width, gui.frame_height))
     voice_rec: VoiceRecognition = VoiceRecognition(
         input_device_index=args.input_index,
         logger=logger)
@@ -818,8 +907,8 @@ if __name__ == "__main__":
         keyboard_input = KeyboardInput(logger=logger)
 
         keyboard_input.register_event_subscriber("keyboard_input_ready",
-                                             "llm",
-                                             llm.keyword_input_handler)
+                                                 "llm",
+                                                 llm.keyword_input_handler)
         voice_rec.register_event_subscriber("voice_input_ready",
                                         "keyword_input",
                                         keyboard_input.voice_input_ready_handler)
@@ -843,16 +932,27 @@ if __name__ == "__main__":
         android_input.register_event_subscriber(AndroidInputEvents.INPUT_READY,
                                                 "llm",
                                                 llm.keyword_input_handler)
+        android_input.register_event_subscriber(AndroidInputEvents.INPUT_READY,
+                                                "gui",
+                                                gui.new_keyword_handler)
         voice_rec.register_event_subscriber("voice_input_ready",
                                             "keyword_input",
-                                            android_input.voice_input_ready_handler)
+                                            android_input.need_input_handler)
         android_input_thread: threading.Thread = threading.Thread(
             target=android_input.start_input,
             daemon=True
         )
         android_input_thread.start()
+        gui.register_subscriber("android-need-input",
+                                android_input.need_input_handler)
+        tcp_server_handler = TCPServerHandler(tcp_serv.new_msg_to_write_handler)
+        formatter = logging.Formatter('%(asctime)s-%(levelname)s-%(message)s\n')
+        tcp_server_handler.setFormatter(formatter)
+        tcp_server_handler.setLevel(logging.INFO)
+        logger.addHandler(tcp_server_handler)
 
     gui.register_subscriber("done_choosing_llm_option", tts.add_text_handler)
+    gui.register_subscriber("llm-reset-keywords", lambda : llm.voice_rec_input_handler("RESET"))
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
     gui.register_subscriber("llm-add-prompt", llm.add_prompt_handler)
     gui.register_subscriber("new-frame-to-record",
@@ -865,6 +965,7 @@ if __name__ == "__main__":
         "done_choosing_emotion_option",
         tts.add_emotion_handler
     )
+    
 
     voice_rec.register_event_subscriber("voice_input_ready",
                                         "llm",
@@ -887,6 +988,7 @@ if __name__ == "__main__":
 
     gui.add_ui_component("llm-options", gui.render_llm_options)
     gui.add_ui_component("voice_rec_text", lambda x: x)
+    gui.add_ui_component("keyword_text", lambda x : x)
     gui.add_ui_component("voice_recording_start", lambda x: x)
     gui.add_ui_component("emotion_options", gui.render_emotion_options)
     gui.add_ui_component("mediapipe", lambda: None)
@@ -911,7 +1013,8 @@ if __name__ == "__main__":
         target = gesture_rec.start_recognition,
         daemon=True
     )
-    
+
+    logger.info(f"Level: {args.level}")
     gesture_rec_thread.start()
     voice_rec_thread.start()
     llm_thread.start()

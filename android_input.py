@@ -41,7 +41,7 @@ class AndroidInput():
         for d in self.event_subscribers[event].keys():
             self.notify_event_subscriber(event, d, *args)
     
-    def voice_input_ready_handler(self):
+    def need_input_handler(self):
         with self.need_response_cond:
             self.need_response = True
             self.need_response_cond.notify()
@@ -57,10 +57,15 @@ class AndroidInput():
                 while not self.need_response or self.msg_q.empty():
                     self.need_response_cond.wait()
                 msg: str = self.msg_q.get_nowait()
-                self.logger.info(f"the android phone sent this: {msg}")
+                self.logger.debug(f"the android phone sent this: {msg}")
                 self.notify_event_subscriber(
                     AndroidInputEvents.INPUT_READY,
                     "llm",
+                    msg
+                )
+                self.notify_event_subscriber(
+                    AndroidInputEvents.INPUT_READY,
+                    "gui",
                     msg
                 )
             print("A")
