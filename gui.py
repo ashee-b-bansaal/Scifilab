@@ -15,6 +15,7 @@ import math
 from typing import Callable, Tuple, Union
 from voice_recognition import VoiceRecognition
 import textwrap
+from keyboard_gui import KeyboardGUIInput
 from kbd_input import KeyboardInput
 from video_recorder import VideoRecorder
 from chatgpt_api import ChatGPTAPI
@@ -27,7 +28,7 @@ import mp_drawing_utils
 from gesture_recognition import GestureRecognition
 
 
-class TCPServerHandler(logging.Handler):
+class QueueHandler(logging.Handler):
     def __init__(self, add_new_msg_callback):
         super().__init__()
 
@@ -671,7 +672,7 @@ class GUIClass():
             (200, 100),
             cv2.FONT_HERSHEY_COMPLEX,
             1.0,
-            (0, 0, 0),
+            (255, 0, 0),
             1)
 
             
@@ -721,7 +722,7 @@ class GUIClass():
         self.logger.info(f"Hearing: {text}")
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = VoiceRecTextComponent(
-            text, 25, (10, self.canvas.shape[0] - 10))
+            text, 25, (self.canvas.shape[1] // 2 - 100, self.canvas.shape[0] - 10))
         self.render_functions["voice_rec_text"] = lambda canvas: self.voice_rec_text_component.render_component(
             canvas)
         
@@ -950,17 +951,32 @@ if __name__ == "__main__":
         logger=logger)
     
     if args.word_input == "keyboard":
-        keyboard_input = KeyboardInput(logger=logger)
+        keyboard_input = KeyboardGUIInput(
+            new_keyboard_input_handler_list=[
+                llm.keyword_input_handler, gui.new_keyword_handler],
+            logger=logger)
+        
 
-        keyboard_input.register_event_subscriber("keyboard_input_ready",
-                                                 "llm",
-                                                 llm.keyword_input_handler)
-        voice_rec.register_event_subscriber("voice_input_ready",
-                                        "keyword_input",
-                                        keyboard_input.voice_input_ready_handler)
+        # keyboard_input.register_event_subscriber("keyboard_input_ready",
+                                                 # "llm",
+                                                 # llm.keyword_input_handler)
+
+                
+        keyboard_input_log_handler = QueueHandler(
+            keyboard_input.new_message_handler)
+        
+        formatter = logging.Formatter('%(message)s\n')
+        keyboard_input_log_handler.setFormatter(formatter)
+        keyboard_input_log_handler.setLevel(logging.INFO)
+        logger.addHandler(keyboard_input_log_handler)
+        
+        voice_rec.register_event_subscriber(
+            "voice_input_ready",
+            "keyword_input",
+            keyboard_input.need_keyboard_input)
 
         keyboard_input_thread: threading.Thread = threading.Thread(
-            target=keyboard_input.start_input,
+            target=keyboard_input.run,
             daemon=True
         )
         keyboard_input_thread.start()
@@ -991,7 +1007,8 @@ if __name__ == "__main__":
         android_input_thread.start()
         gui.register_subscriber("android-need-input",
                                 android_input.need_input_handler)
-        tcp_server_handler = TCPServerHandler(tcp_serv.new_msg_to_write_handler)
+        
+        tcp_server_handler = QueueHandler(tcp_serv.new_msg_to_write_handler)
         formatter = logging.Formatter('%(message)s\n')
         tcp_server_handler.setFormatter(formatter)
         tcp_server_handler.setLevel(logging.INFO)
