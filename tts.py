@@ -30,7 +30,13 @@ class Emotions(Enum):
 
 
 class TTS():
-    def __init__(self, finished_speaking_handler: Callable, logger: logging.Logger, output_device_index=None,gender="female"):
+    def __init__(self,
+                 tts_start_handler: Callable,
+                 tts_end_handler: Callable,
+                 logger: logging.Logger,
+                 output_device_index=None,
+                 gender="female"):
+        self.tts_start_handler = tts_start_handler
         self.logger = logger
         self.tts_q: queue.Queue = queue.Queue()
         self.voice= FEMALE_VOICE if gender=="female" else MALE_VOICE
@@ -43,7 +49,7 @@ class TTS():
         self.output_device_index=output_device_index
         self.tts_stream = TextToAudioStream(
             engine=self.tts_engine,
-            on_audio_stream_stop = finished_speaking_handler,
+            on_audio_stream_stop = tts_end_handler,
             level=logging.INFO,
             frames_per_buffer=248,
             output_device_index=self.output_device_index
@@ -69,6 +75,7 @@ class TTS():
                 with self.need_tts_cond:
                     while not self.need_tts or self.tts_q.empty():
                         self.need_tts_cond.wait()
+                    self.tts_start_handler()
                     emotion,text = self.tts_q.get_nowait()
                     print("tts emotion and text",emotion, text)
                     self.tts_engine.set_emotion(emotion, emotion_degree=2.0)

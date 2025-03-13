@@ -1,3 +1,4 @@
+from functools import partial
 import logging
 import sys
 from camera_module import OpenCVCamera
@@ -298,8 +299,10 @@ class GUIClass():
                  interaction_cam = None,
                  fullscreen=False,
                  black=False,
+                 emotional_voice=False
                  ) -> None:
         self.logger = logger
+        self.emotional_voice = emotional_voice
         
         self.interaction_cam = interaction_cam
         self.hand_cam = hand_cam
@@ -360,36 +363,40 @@ class GUIClass():
         self.llm_options: list[OptionComponent] = []
         self.selected_llm_option_index = -1
         self.number_of_llm_options = 5
+        if self.emotional_voice: 
+            self.emotion_options: list[OptionComponent] = [
+                OptionComponent("SAD",
+                                50,
+                                (100, 100),
+                                self.emotion_progress_full_handler, value=Emotions.SAD),
 
-        self.emotion_options: list[OptionComponent] = [
-            OptionComponent("SAD",
-                            50,
-                            (100, 100),
-                            self.emotion_progress_full_handler, value=Emotions.SAD),
-                            
-            OptionComponent("HAPPY",
-                            50,
-                            (100, 200),
-                            self.emotion_progress_full_handler, value=Emotions.HAPPY
-                            ),
-            OptionComponent("NEUTRAL",
-                            50,
-                            (100, 300),
-                            self.emotion_progress_full_handler, value=Emotions.NEUTRAL),
+                OptionComponent("HAPPY",
+                                50,
+                                (100, 200),
+                                self.emotion_progress_full_handler, value=Emotions.HAPPY
+                                ),
+                OptionComponent("NEUTRAL",
+                                50,
+                                (100, 300),
+                                self.emotion_progress_full_handler, value=Emotions.NEUTRAL),
 
-            OptionComponent("TERRIFIED",
-                            50,
-                            (100, 400),
-                            self.emotion_progress_full_handler, value=Emotions.TERRIFIED),
+                OptionComponent("TERRIFIED",
+                                50,
+                                (100, 400),
+                                self.emotion_progress_full_handler, value=Emotions.TERRIFIED),
 
-            OptionComponent("ANGRY",
-                            50,
-                            (100, 500),
-                            self.emotion_progress_full_handler, value=Emotions.ANGRY)
-        ]
-        
-        self.selected_emotion_option_index = -1
-        self.number_of_emotion_options = 5
+                OptionComponent("ANGRY",
+                                50,
+                                (100, 500),
+                                self.emotion_progress_full_handler, value=Emotions.ANGRY)
+            ]
+
+            self.selected_emotion_option_index = -1
+            self.number_of_emotion_options = 5
+        else:
+            self.selected_emotion_option_index = -1
+            self.number_of_emotion_options = 0
+            self.emotion_options = []
         
         self.voice_rec_text_component: VoiceRecTextComponent = VoiceRecTextComponent(
             "", 36, (0, 0))
@@ -461,7 +468,8 @@ class GUIClass():
                     break
 
             if hand_frame.shape[0] != self.frame_height or hand_frame.shape[1] != self.frame_width:
-                hand_frame = cv2.resize(hand_frame, (self.frame_width, self.frame_height), interpolation=cv2.INTER_LINEAR)
+                # hand_frame = cv2.resize(hand_frame, (self.frame_width, self.frame_height), interpolation=cv2.INTER_LINEAR)
+                pass
             if self.num_cam == 2:
                 if interaction_frame.shape[0] != self.frame_height or interaction_frame.shape[1] != self.frame_width:
                     interaction_frame = cv2.resize(interaction_frame, (self.frame_width, self.frame_height), interpolation=cv2.INTER_LINEAR)
@@ -578,7 +586,7 @@ class GUIClass():
         line_width = 36
         llm_options = [rep for rep in response.splitlines() if len(
             rep) > 2 and rep[0].isdigit()]
-        self.logger.info(f"the options sent by the llm are {llm_options}")
+        self.logger.info(f"ChatGPT: {llm_options}")
         assert(len(llm_options) == self.number_of_llm_options - 1)
         self.llm_options.clear()
         
@@ -635,20 +643,38 @@ class GUIClass():
             
     def llm_progress_full_handler(self):
         if self.render_ready['llm-options']:
-            self.logger.info(f"the user chooses llm option: {self.llm_options[self.selected_llm_option_index].text}")
+            self.logger.info(f"DHH: {self.llm_options[self.selected_llm_option_index].text}")
             self.notify_subscriber(
                 "llm-add-prompt",
                 "B",
                 self.llm_options[self.selected_llm_option_index].text
             )
-            self.notify_subscriber(
-                "done_choosing_llm_option",
-                copy.deepcopy(self.llm_options[self.selected_llm_option_index].text))
-            self.selected_llm_option_index = -1
             self.render_ready["llm-options"] = False
-            self.render_ready["emotion_options"] = True
             self.render_ready["keyword_text"] = False
+            if self.emotional_voice: 
+                self.render_ready["emotion_options"] = True
+                self.notify_subscriber(
+                    "done_choosing_llm_option", copy.deepcopy(self.llm_options[self.selected_llm_option_index].text))
+            else:
+                self.notify_subscriber(
+                    "done_choosing_llm_option_neutral",
+                    copy.deepcopy(self.llm_options[self.selected_llm_option_index].text)
+                )
 
+            self.selected_llm_option_index = -1
+
+
+    def render_tts_indicator(self, canvas):
+        cv2.putText(
+            canvas,
+            "TTS is speaking",
+            (200, 100),
+            cv2.FONT_HERSHEY_COMPLEX,
+            1.0,
+            (0, 0, 0),
+            1)
+
+            
     def render_emotion_options(self, canvas):
         for i in range(self.number_of_emotion_options):
             # if i == self.selected_emotion_option_index:
@@ -692,7 +718,7 @@ class GUIClass():
 
     
     def voice_input_ready_handler(self, text: str):
-        self.logger.info(f"the hearing person says this: {text}")
+        self.logger.info(f"Hearing: {text}")
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = VoiceRecTextComponent(
             text, 25, (10, self.canvas.shape[0] - 10))
@@ -721,6 +747,11 @@ class GUIClass():
         """
         self.render_ready["voice-recording-start"] = False
 
+    def on_tts_start_handler(self):
+        self.render_ready["tts_indicator"] = True
+
+    def on_tts_end_handler(self):
+        self.render_ready["tts_indicator"] = False
 
 def display_top(snapshot, key_type='lineno', limit=15):
     snapshot = snapshot.filter_traces((
@@ -809,6 +840,13 @@ if __name__ == "__main__":
         choices = ["1", "2", "3"],
         default = "1"
     )
+
+    parser.add_argument(
+        "-em",
+        "--emotional-voice",
+        help = "whether to use emotional voice or not",
+        action = "store_true"
+    )
     
 
     args = parser.parse_args()
@@ -880,14 +918,15 @@ if __name__ == "__main__":
 
     exit_event: threading.Event = threading.Event()
     hand_cam = OpenCVCamera(0, 720, 1280, 30.0)
-    interaction_cam = OpenCVCamera(2, 480, 640, 30.0)
+    interaction_cam = OpenCVCamera(2, 720, 1280, 30.0)
 
     gui: GUIClass = GUIClass(exit_event=exit_event,
                              fullscreen=args.fullscreen,
                              black=args.black,
                              hand_cam = hand_cam,
                              interaction_cam=interaction_cam,
-                             logger=logger
+                             logger=logger,
+                             emotional_voice=args.emotional_voice
                              )
     video_recorder = VideoRecorder(video_path, video_filename, frame_size=(gui.frame_width, gui.frame_height))
     voice_rec: VoiceRecognition = VoiceRecognition(
@@ -895,11 +934,18 @@ if __name__ == "__main__":
         logger=logger)
 
     llm: ChatGPTAPI = ChatGPTAPI(logger=logger)
+
+    def tts_finished_speaking_handler():
+        voice_rec.voice_start_handler()
+        gui.on_tts_end_handler()
+
     tts: TTS = TTS(
-        finished_speaking_handler=voice_rec.voice_start_handler,
+        tts_start_handler=gui.on_tts_start_handler,
+        tts_end_handler=tts_finished_speaking_handler,
         gender=args.voice_gender,
         output_device_index=args.output_index,
         logger=logger)
+    
     gesture_rec: GestureRecognition = GestureRecognition(
         logger=logger)
     
@@ -946,12 +992,21 @@ if __name__ == "__main__":
         gui.register_subscriber("android-need-input",
                                 android_input.need_input_handler)
         tcp_server_handler = TCPServerHandler(tcp_serv.new_msg_to_write_handler)
-        formatter = logging.Formatter('%(asctime)s-%(levelname)s-%(message)s\n')
+        formatter = logging.Formatter('%(message)s\n')
         tcp_server_handler.setFormatter(formatter)
         tcp_server_handler.setLevel(logging.INFO)
-        logger.addHandler(tcp_server_handler)
+        # logger.addHandler(tcp_server_handler)
 
-    gui.register_subscriber("done_choosing_llm_option", tts.add_text_handler)
+    if gui.emotional_voice:
+        gui.register_subscriber("done_choosing_llm_option", tts.add_text_handler)
+        gui.register_subscriber(
+            "done_choosing_emotion_option",
+            tts.add_emotion_handler
+        )
+    else:
+        gui.register_subscriber("done_choosing_llm_option_neutral", partial(tts.add_tts_handler, Emotions.NEUTRAL))
+
+    
     gui.register_subscriber("llm-reset-keywords", lambda : llm.voice_rec_input_handler("RESET"))
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
     gui.register_subscriber("llm-add-prompt", llm.add_prompt_handler)
@@ -960,12 +1015,8 @@ if __name__ == "__main__":
     gui.register_subscriber("new-frame-to-process",
                             gesture_rec.new_frame_handler)
     gui.register_subscriber("video-record-exit",
-                            video_recorder.exit_event_handler)
-    gui.register_subscriber(
-        "done_choosing_emotion_option",
-        tts.add_emotion_handler
-    )
-    
+                           video_recorder.exit_event_handler)
+
 
     voice_rec.register_event_subscriber("voice_input_ready",
                                         "llm",
@@ -992,6 +1043,10 @@ if __name__ == "__main__":
     gui.add_ui_component("voice_recording_start", lambda x: x)
     gui.add_ui_component("emotion_options", gui.render_emotion_options)
     gui.add_ui_component("mediapipe", lambda: None)
+
+        
+    gui.add_ui_component("tts_indicator", gui.render_tts_indicator)
+
 
     voice_rec_thread: threading.Thread = threading.Thread(
         target=voice_rec.start_voice_input,

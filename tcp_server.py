@@ -9,8 +9,8 @@ from events import Events, TCPServerEvents
 
 
 # Red rover at dorm
-IP = "192.168.0.38"
-PORT = 5443
+IP = "10.49.46.5"
+PORT = 5432
 
 
 class TCPServer():
