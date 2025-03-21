@@ -1,0 +1,9 @@
+1. How well does the system detect ASL digits 1-5 for choosing an option? (1 = Very poorly, it does not detect the digits correctly, 7 = Very well, it detects the digits accurately)---RADIO
+2. How well does the system detect ASL digit 10 for confirming the selection? (1 = Very poorly, it does not detect the digit correctly, 7 = Very well, it detects the digit accurately)---RADIO
+3. How easy is it to use this system for making selections? (1 = Very difficult, 7 = Very easy)---RADIO
+4. If you are not satisfied, why? What improvements would you suggest?---TEXT
+5. How natural and unobtrusive do you find these gestures for making selections? (1 = Not implicit at all, feels intentional and noticeable, 7 = Very implicit, feels seamless and unnoticeable)---RADIO
+6. Would you prefer any alternative gestures for selection? If so, please describe what kind of gestures you would like.---TEXT
+7. If you could use microgestures (e.g., finger movements) with an additional device such as a ring, wristband, or smartwatch for the selection process, would you prefer to use these gestures for selection? (1 = Not at all, 7 = Definitely)---RADIO
+8. Please explain your reasoning:---TEXT
+9. Do you have any recommendations on improving the selection process?---TEXT

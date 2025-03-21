@@ -13,18 +13,20 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 
-NUMBER_OF_OPTIONS = 4
+NUMBER_OF_OPTIONS = 3
 
 default_img = cv2.imread("istockphoto-1315588490-612x612.jpg")
 
-DEFAULT_CONTEXT = f"Your role is to help facilitate a conversation happening between person A and person B. You will be given what person A says. You have to generate {NUMBER_OF_OPTIONS} short 1-sentence responses each on its own line with a number at the start for person B based on a few keywords. The responses should have different meaning but based on the same keywords. Person B will then choose one of these {NUMBER_OF_OPTIONS} responses and you should remember their response."
+NUM_WORDS = 5
+
+DEFAULT_CONTEXT = f"Your role is to help facilitate a conversation happening between person A and person B. You will be given what person A says. You have to generate {NUMBER_OF_OPTIONS} short 1-sentence responses with less than {NUM_WORDS} words each on its own line with a number at the start for person B based on a few keywords. The responses should have different meaning but based on the same keywords. Person B will then choose one of these {NUMBER_OF_OPTIONS} responses and you should remember their response."
 
 def generate_person_b_prompt(voice_rec_input: str, kbd_input: str):
     return f"Person A says: \"{voice_rec_input}\"." \
         f"Keywords for Person B are: {kbd_input}. "
 
 def regenerate_person_b_prompt(new_keywords: str):
-    return f"Please regerenate 4 responses for Person B responses based on these keywords:{new_keywords}"
+    return f"Please regerenate {NUMBER_OF_OPTIONS} responses for Person B responses based on these keywords:{new_keywords}"
 
 
 def encode_image(image):
@@ -146,6 +148,10 @@ class ChatGPTAPI():
             self.need_response = True
             self.need_response_cond.notify()
 
+    def repeat_keywords_new_options_handler(self):
+        self.add_prompt_handler("A", "Please generate 3 more responses each on its own line based on the previous keywords.")
+        
+
     def start_conversation(self):
         try:
             # wait until the context is initialized
@@ -173,7 +179,7 @@ class ChatGPTAPI():
                         "role": "assistant",
                         "content": response_content
                     })
-                    self.logger.debug(f"llm message history:{self.messages}")
+                    # self.logger.debug(f"llm message history:{self.messages}")
                     self.need_response = False
                     if sender == "A":
                         if "new-response" in self.event_subscribers:

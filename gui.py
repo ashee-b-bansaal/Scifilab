@@ -1,9 +1,11 @@
+from switch_tasks_gui import SwitchTaskGUI
 from functools import partial
 import logging
 import sys
 from camera_module import OpenCVCamera
 import linecache
 from datetime import datetime
+import time
 import os
 import shutil
 import argparse
@@ -62,24 +64,57 @@ def delete_contents_folder(folder: str):
         except Exception as e:
             print('Failed to delete %s. Reason: %s' % (file_path, e))
 
+def flatten(xss):
+    return [x for xs in xss for x in xs]
 
-class VoiceRecTextComponent():
+class TextComponent():
     def __init__(self,
                  text: str,
                  line_width: int,
-                 bot_left: Tuple[int, int]):
+                 bot_left: Tuple[int, int],
+                 progress_bar: bool = False,
+                 full_progress_time: float = 1.0, #progress will start counting once the compoent is rendered
+                 full_progress_width: int = 0,
+                 bg_color=(255, 0, 0) ): # number of pixels
+        self.font_scale = 0.8
         self.text = text
         self.bot_left = bot_left
         self.line_width = line_width
-        self.text_list = textwrap.wrap(text, width=line_width)
-        self.bg_color = (255, 0, 0)
 
+        self.text_list = self.text.split('\n')
+        self.text_list = flatten([textwrap.wrap(line, width=line_width) for line in self.text_list])
+        print("text list for text component is ", self.text_list) 
+        
+        self.bg_color = bg_color
+
+        self.progress_bar = progress_bar
+        self.full_progress_time = full_progress_time
+        self.current_progress_time = 0.0
+        self.start_progress_timestamp = 0.0
+        self.full_progress_width = full_progress_width
+        self.current_progress_bar_width = 0
+
+    def set_bot_left(self, bot_left):
+        self.bot_left = bot_left
+    
+    def set_text(self, text):
+        self.text = text
+        self.text_list = self.text.split('\n')
+        self.text_list = flatten([textwrap.wrap(line, width=self.line_width) for line in self.text_list])
+
+    def reset_progress(self):
+        self.current_progress_time = 0.0
+
+    def set_full_progress_time(self, length: float):
+        self.full_progress_time = length
+        
     def render_component(self, canvas):
-        font_scale = 1.0
+            
+        font_scale = self.font_scale
         font_thickness = 2
         line_spacing = 10
         padding = 10
-
+        
         # Calculate text dimensions
         max_width = 0
         total_height = 0
@@ -96,7 +131,7 @@ class VoiceRecTextComponent():
         cv2.rectangle(canvas, rect_start, rect_end, self.bg_color, -1)
 
         # Draw text
-        y = self.bot_left[1] - padding
+        y = self.bot_left[1]
         for line in reversed(self.text_list):  # Reverse to start from bottom
             (_, text_height), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
             y -= text_height
@@ -104,6 +139,31 @@ class VoiceRecTextComponent():
                         cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness, cv2.LINE_AA)
             y -= line_spacing
 
+        if self.progress_bar:
+            if self.current_progress_time == 0.0:
+                self.start_progress_timestamp = time.time()
+            self.current_progress_time = time.time() - self.start_progress_timestamp
+            if self.current_progress_time < self.full_progress_time:
+                self.current_progress_bar_width = int((self.current_progress_time / self.full_progress_time) * self.full_progress_width)
+
+            cv2.line(
+                canvas,
+                (0, rect_start[1] - 5),
+                # End at the calculated right position
+                (self.current_progress_bar_width, rect_start[1] - 5),
+                (255, 0, 0),
+                thickness=3
+            )
+            
+            cv2.line(
+                canvas,
+                # Start at the calculated bottom left
+                (0, rect_end[1]),
+                # End at the calculated bottom right
+                (self.current_progress_bar_width, rect_end[1]),
+                (255, 0, 0),
+                thickness=3
+            )
 
 
 class OptionComponent():
@@ -112,7 +172,7 @@ class OptionComponent():
                  line_width: int,
                  bot_left: Tuple[int, int],
                  progress_100_callback: Callable,
-                 progress_speed=1,
+                 progress_speed=2,
                  value = None):
         """
         bot_left means the bottom left of where the intended string is
@@ -129,7 +189,7 @@ class OptionComponent():
         self.text_height = 0
         self.line_heights = []
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()
-        self.color = (0, 255, 0)
+        self.color = (255, 255, 255)
 
         for i in range(len(self.text_list)):
             (width, height), baseline = cv2.getTextSize(
@@ -175,10 +235,22 @@ class OptionComponent():
             self.bold()
             self.color =  (0, 0, 255)
         else:
-            self.color =  (0, 255, 0)
+            self.color =  (255, 255, 255)
             self.unbold()
         
         for i in range(len(self.text_list)):
+            (text_width, text_height), _ = cv2.getTextSize(self.text_list[i], cv2.FONT_HERSHEY_SIMPLEX, 1, self.thickness)
+            rect_start = (self.bot_left_list[i][0], self.bot_left_list[i][1] - text_height - 5)
+            rect_end = (self.bot_left_list[i][0] + text_width, self.bot_left_list[i][1] + 10)
+
+
+            cv2.rectangle(
+                canvas,
+                rect_start,
+                rect_end,
+                (0, 0, 0),
+                -1
+            )
             cv2.putText(
                 canvas,
                 self.text_list[i],
@@ -300,8 +372,16 @@ class GUIClass():
                  interaction_cam = None,
                  fullscreen=False,
                  black=False,
-                 emotional_voice=False
+                 emotional_voice=False,
+                 keyword_text=False,
+                 tasks: list[str] = [""]
                  ) -> None:
+        self.tasks = tasks
+        
+        self.current_task_index_lock: threading.Lock = threading.Lock()
+        self.current_task_index = 0
+
+        
         self.logger = logger
         self.emotional_voice = emotional_voice
         
@@ -398,9 +478,36 @@ class GUIClass():
             self.selected_emotion_option_index = -1
             self.number_of_emotion_options = 0
             self.emotion_options = []
-        
-        self.voice_rec_text_component: VoiceRecTextComponent = VoiceRecTextComponent(
+
+        self.voice_rec_text_component: TextComponent = TextComponent(
             "", 36, (0, 0))
+
+        self.keyword_text = keyword_text
+        if self.keyword_text:
+            self.keyword_text_component: TextComponent = TextComponent(
+                "",
+                30,
+                (50, 75),
+                bg_color=(255, 255, 255)
+            )
+
+        self.tts_indicator_component: TextComponent = TextComponent(
+            "Speaking",
+            30,
+            (50, 75),
+            True,
+            2.0,
+            self.frame_width,
+            bg_color=(0, 165, 255)
+        )
+        self.last_chosen_llm_option = ""
+        self.current_task_component = TextComponent(
+            self.tasks[0],
+            30,
+            (50, 390),
+            False,
+            bg_color=(0, 0, 0),
+        )
 
 
     def register_subscriber(self, subscriber_name: str, fn: Callable):
@@ -442,6 +549,14 @@ class GUIClass():
             print("esc done")
         elif pressed_key == ord(' '):
             self.notify_subscriber("voice-start")
+            self.render_ready["current_task"] = True
+            self.logger.info(f"Phase {self.current_task_index}: {self.tasks[self.current_task_index]}")
+            
+
+        elif pressed_key == ord('n'):
+            # self.notify_subscriber("voice-start")
+            # self.render_ready["current_task"] = True
+            gui.update_current_task_index()
         elif pressed_key == 84:  # up arrow:
             if self.render_ready['llm-options']:
                 self.selected_llm_option_index = (
@@ -518,7 +633,7 @@ class GUIClass():
         brect,
         hand_sign,
         landmark_list)
-        cv2.putText(canvas, f"Number:{hand_sign}", (canvas.shape[1] - 250, canvas.shape[0]), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
+        cv2.putText(canvas, f"Sign:{hand_sign}", (canvas.shape[1] - 250, canvas.shape[0] - 8), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
         
     def mediapipe_callback_handler(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
         # self.logger.debug(f"mediapipe classify user gestures: {hand_sign}")
@@ -587,13 +702,15 @@ class GUIClass():
         line_width = 36
         llm_options = [rep for rep in response.splitlines() if len(
             rep) > 2 and rep[0].isdigit()]
+        llm_options = [option.replace("’", "'") for option in llm_options]
         self.logger.info(f"ChatGPT: {llm_options}")
-        assert(len(llm_options) == self.number_of_llm_options - 1)
+        print(llm_options)
+        assert(len(llm_options) == self.number_of_llm_options - 2)
         self.llm_options.clear()
         
         for i in range(len(llm_options)):
             if i == 0:
-                text_bottom_left = (self.frame_width//2, 50 + 100 * i)
+                text_bottom_left = (self.frame_width//2, 200 + 100 * i)
             else:
                 text_bottom_left = (
                     self.llm_options[i - 1].bot_left_list[-1][0],
@@ -603,44 +720,49 @@ class GUIClass():
                     llm_options[i],
                     line_width,
                     text_bottom_left, self.llm_progress_full_handler))
+        next_option_bottom_left = (
+            self.llm_options[-1].bot_left_list[-1][0],
+            self.llm_options[-1].bot_left_list[-1][1] + 2 * self.llm_options[-1].line_heights[-1])
+
+        self.llm_options.append(
+            OptionComponent(
+                "4. NEXT",
+                line_width,
+                next_option_bottom_left,
+                self.llm_next_progress_full_handler))
+
         reset_option_bottom_left = (
             self.llm_options[-1].bot_left_list[-1][0],
             self.llm_options[-1].bot_left_list[-1][1] + 2 * self.llm_options[-1].line_heights[-1])
+
         self.llm_options.append(
             OptionComponent(
-                "RESET",
+                "5. RESET",
                 line_width,
                 reset_option_bottom_left,
                 self.llm_reset_progress_full_handler))
 
         self.render_ready["llm-options"] = True
-
         self.render_ready["voice_rec_text"] = False
 
+    def llm_next_progress_full_handler(self):
+        if self.render_ready['llm-options']:
+            self.logger.info("DHH: NEXT chosen")
+            self.notify_subscriber("llm-repeat-keywords")
+            # self.selected_llm_option_index = -1
+            self.render_ready["llm-options"] = False
+        
     def llm_reset_progress_full_handler(self):
         if self.render_ready['llm-options']:
-            self.logger.info("reset chose n   bb")
+            self.logger.info("DHH: RESET chosen")
             self.notify_subscriber(
                 "llm-reset-keywords"
             )
-            self.notify_subscriber("android-need-input")
-            
-            # if self.selected_llm_option_index != 4:
-            #     self.notify_subscriber(
-            #         "llm-add-prompt",
-            #         "B",
-            #         self.llm_options[self.selected_llm_option_index].text
-            #     )
-            #     self.notify_subscriber(
-            #         "done_choosing_llm_option",
-            #         copy.deepcopy(self.llm_options[self.selected_llm_option_index].text))
-            #     self.selected_llm_option_index = -1
-            self.selected_llm_option_index = -1
+            self.notify_subscriber("need-keyword-input")
+            # self.selected_llm_option_index = -1
             self.render_ready["llm-options"] = False
-            self.render_ready["keyword_text"] = False
-            # self.render_ready["emotion_options"] = True
-            # else:
-            #     pass
+            if self.keyword_text:
+                self.render_ready["keyword_text"] = False
             
     def llm_progress_full_handler(self):
         if self.render_ready['llm-options']:
@@ -650,8 +772,10 @@ class GUIClass():
                 "B",
                 self.llm_options[self.selected_llm_option_index].text
             )
+            self.last_chosen_llm_option = copy.deepcopy(self.llm_options[self.selected_llm_option_index].text)
             self.render_ready["llm-options"] = False
-            self.render_ready["keyword_text"] = False
+            if self.keyword_text:
+                self.render_ready["keyword_text"] = False
             if self.emotional_voice: 
                 self.render_ready["emotion_options"] = True
                 self.notify_subscriber(
@@ -659,23 +783,11 @@ class GUIClass():
             else:
                 self.notify_subscriber(
                     "done_choosing_llm_option_neutral",
-                    copy.deepcopy(self.llm_options[self.selected_llm_option_index].text)
+                    self.llm_options[self.selected_llm_option_index].text[3:]
                 )
 
-            self.selected_llm_option_index = -1
+            # self.selected_llm_option_index = -1
 
-
-    def render_tts_indicator(self, canvas):
-        cv2.putText(
-            canvas,
-            "TTS is speaking",
-            (200, 100),
-            cv2.FONT_HERSHEY_COMPLEX,
-            1.0,
-            (255, 0, 0),
-            1)
-
-            
     def render_emotion_options(self, canvas):
         for i in range(self.number_of_emotion_options):
             # if i == self.selected_emotion_option_index:
@@ -690,12 +802,12 @@ class GUIClass():
 
 
     def new_keyword_handler(self, text):
-        self.render_functions["keyword_text"] = lambda canvas: self.render_keyword_text(canvas, text)
-        self.render_ready["keyword_text"] = True
+        self.logger.info(f"DHH sign: {text}")
+        # self.keyword_text_component.reset()
+        if self.keyword_text:
+            self.keyword_text_component.set_text(text)
+            self.render_ready["keyword_text"] = True
         
-    def render_keyword_text(self, canvas, text):
-        cv2.putText(canvas, text, (50, 50), cv2.FONT_HERSHEY_COMPLEX, 1.0, (0, 255, 0), 2)
-            
     def emotion_progress_full_handler(self):
         if self.render_ready['emotion_options']:
             self.logger.info(f"the user chooses emotion option: {self.emotion_options[self.selected_emotion_option_index].value}")
@@ -721,8 +833,8 @@ class GUIClass():
     def voice_input_ready_handler(self, text: str):
         self.logger.info(f"Hearing: {text}")
         self.render_ready["voice_rec_text"] = True
-        self.voice_rec_text_component = VoiceRecTextComponent(
-            text, 25, (self.canvas.shape[1] // 2 - 100, self.canvas.shape[0] - 10))
+        self.voice_rec_text_component = TextComponent(
+            text, 25, (self.canvas.shape[1] // 2 - 100, self.canvas.shape[0] - 200))
         self.render_functions["voice_rec_text"] = lambda canvas: self.voice_rec_text_component.render_component(
             canvas)
         
@@ -749,10 +861,37 @@ class GUIClass():
         self.render_ready["voice-recording-start"] = False
 
     def on_tts_start_handler(self):
+        self.logger.info(f"Speaking: {self.last_chosen_llm_option}")
+        self.tts_indicator_component.set_text(self.last_chosen_llm_option)
+        self.tts_indicator_component.set_bot_left(
+            self.llm_options[self.selected_llm_option_index].bot_left_list[0])
+        self.tts_indicator_component.reset_progress()
         self.render_ready["tts_indicator"] = True
 
     def on_tts_end_handler(self):
+        self.logger.info(f"Speaking {self.last_chosen_llm_option} done")
         self.render_ready["tts_indicator"] = False
+
+    def render_current_task(self, canvas):
+        with self.current_task_index_lock:
+            cv2.putText(
+                canvas,
+                self.tasks[self.current_task_index],
+                (50, 500),
+                cv2.FONT_HERSHEY_COMPLEX,
+                1.0,
+                (255, 0, 255),
+                1
+            )
+
+    def update_current_task_index(self):
+        with self.current_task_index_lock:
+            if self.current_task_index == len(self.tasks) - 1:
+                return
+            self.current_task_index += 1
+            self.current_task_component.set_text(self.tasks[self.current_task_index])
+            self.logger.info(f"Phase {self.current_task_index}:{self.tasks[self.current_task_index]}")
+                
 
 def display_top(snapshot, key_type='lineno', limit=15):
     snapshot = snapshot.filter_traces((
@@ -779,6 +918,12 @@ def display_top(snapshot, key_type='lineno', limit=15):
     total = sum(stat.size for stat in top_stats)
     print("Total allocated size: %.1f KiB" % (total / 1024))
 
+def parse_task_file(filename: str):
+    with open(filename, 'r') as f:
+        lines = ("\n".join([line.rstrip() for line in f])).split("\n---\n")
+    print(lines)
+    return lines
+    
     
 if __name__ == "__main__":
     logger = logging.getLogger(__name__)
@@ -786,11 +931,27 @@ if __name__ == "__main__":
     
     tracemalloc.start()
     parser = argparse.ArgumentParser()
+
     parser.add_argument(
         "-p",
         "--path",
         help="path to output the data like video, voice recording,...",
         required=True)
+    parser.add_argument(
+        "-tp",
+        "--task-path",
+        help="path to output the task.txt file contaiing the differernt tasks",
+        default = "sample_tasks.txt"
+    )
+    parser.add_argument(
+        "-ti",
+        "--task-input",
+        help="whether to use the laptop gui or android phone to switch tasks",
+        choices = ["laptop", "android"],
+        default = 'laptop',
+        nargs = "?",
+        const = "laptop"
+    )
     parser.add_argument(
         "-fs",
         "--fullscreen",
@@ -835,13 +996,12 @@ if __name__ == "__main__":
         help="audio input index, based on list_audio_indices.py"
     )
     parser.add_argument(
-        "-l",
-        "--level",
-        help = "select level. Level 1 means 1 sign, level 2 means 3 signs, level 3 means full sentence",
-        choices = ["1", "2", "3"],
-        default = "1"
+        "-c",
+        "--condition",
+        help = "select condition",
+        choices = ["1", "2", "3", "4", "5"],
+        required = True
     )
-
     parser.add_argument(
         "-em",
         "--emotional-voice",
@@ -916,18 +1076,20 @@ if __name__ == "__main__":
 
     ### start declaring the different components
 
-
     exit_event: threading.Event = threading.Event()
-    hand_cam = OpenCVCamera(0, 720, 1280, 30.0)
-    interaction_cam = OpenCVCamera(2, 720, 1280, 30.0)
-
+    hand_cam = OpenCVCamera(6, 720, 1280, 30.0)
+    interaction_cam = OpenCVCamera(4, 720, 1280, 30.0)
+    tasks = ["bruh"]
+    if args.task_path != "":
+        tasks = parse_task_file(args.task_path)
     gui: GUIClass = GUIClass(exit_event=exit_event,
                              fullscreen=args.fullscreen,
                              black=args.black,
                              hand_cam = hand_cam,
                              interaction_cam=interaction_cam,
                              logger=logger,
-                             emotional_voice=args.emotional_voice
+                             emotional_voice=args.emotional_voice,
+                             tasks=tasks
                              )
     video_recorder = VideoRecorder(video_path, video_filename, frame_size=(gui.frame_width, gui.frame_height))
     voice_rec: VoiceRecognition = VoiceRecognition(
@@ -937,8 +1099,10 @@ if __name__ == "__main__":
     llm: ChatGPTAPI = ChatGPTAPI(logger=logger)
 
     def tts_finished_speaking_handler():
+        print(gui.llm_options[0].bot_left_list)
         voice_rec.voice_start_handler()
         gui.on_tts_end_handler()
+        
 
     tts: TTS = TTS(
         tts_start_handler=gui.on_tts_start_handler,
@@ -954,7 +1118,11 @@ if __name__ == "__main__":
         keyboard_input = KeyboardGUIInput(
             new_keyboard_input_handler_list=[
                 llm.keyword_input_handler, gui.new_keyword_handler],
-            logger=logger)
+            logger=logger,
+            switch_tasks=False,
+            on_button_click=gui.update_current_task_index
+            
+        )
         
 
         # keyboard_input.register_event_subscriber("keyboard_input_ready",
@@ -975,44 +1143,86 @@ if __name__ == "__main__":
             "keyword_input",
             keyboard_input.need_keyboard_input)
 
+        gui.register_subscriber("need-keyword-input",
+                                keyboard_input.need_keyboard_input)
+
         keyboard_input_thread: threading.Thread = threading.Thread(
             target=keyboard_input.run,
             daemon=True
         )
+
         keyboard_input_thread.start()
     elif args.word_input == "android":
+        
+        pass
+        # tcp_serv = TCPServer(logger=logger)
+        # android_input = AndroidInput(logger=logger)
+        # tcp_serv.register_event_subscriber(
+        #     TCPServerEvents.MSG_RECEIVED,
+        #     "android_input",
+        #     android_input.server_msg_received_handler
+        # )
+
+        # tcp_serv_thread = threading.Thread(target=tcp_serv.start_server, daemon=True)
+        # tcp_serv_thread.start()
+        # android_input.register_event_subscriber(AndroidInputEvents.INPUT_READY,
+        #                                         "llm",
+        #                                         llm.keyword_input_handler)
+        # android_input.register_event_subscriber(AndroidInputEvents.INPUT_READY,
+        #                                         "gui",
+        #                                         gui.new_keyword_handler)
+        # voice_rec.register_event_subscriber("voice_input_ready",
+        #                                     "keyword_input",
+        #                                     android_input.need_input_handler)
+        # android_input_thread: threading.Thread = threading.Thread(
+        #     target=android_input.start_input,
+        #     daemon=True
+        # )
+        # android_input_thread.start()
+        # gui.register_subscriber("need-keyword-input",
+        #                         android_input.need_input_handler)
+        
+        # tcp_server_handler = QueueHandler(tcp_serv.new_msg_to_write_handler)
+        # formatter = logging.Formatter('%(message)s\n')
+        # tcp_server_handler.setFormatter(formatter)
+        # tcp_server_handler.setLevel(logging.INFO)
+        # logger.addHandler(tcp_server_handler)
+
+
+    if args.task_input == "laptop":
+        # switch_task_gui = SwitchTaskGUI(gui.update_current_task_index)
+        # switch_task_gui_t = threading.Thread(target=switch_task_gui.run, daemon=True)
+        # switch_task_gui_t.start()
+        pass
+    elif args.task_input == "android":
         tcp_serv = TCPServer(logger=logger)
-        android_input = AndroidInput(logger=logger)
+        def msg_recieved(msg):
+            # if msg == "next task\n":
+            gui.update_current_task_index()
         tcp_serv.register_event_subscriber(
             TCPServerEvents.MSG_RECEIVED,
-            "android_input",
-            android_input.server_msg_received_handler
+            "gui",
+            msg_recieved
         )
 
-        tcp_serv_thread = threading.Thread(target=tcp_serv.start_server, daemon=True)
-        tcp_serv_thread.start()
-        android_input.register_event_subscriber(AndroidInputEvents.INPUT_READY,
-                                                "llm",
-                                                llm.keyword_input_handler)
-        android_input.register_event_subscriber(AndroidInputEvents.INPUT_READY,
-                                                "gui",
-                                                gui.new_keyword_handler)
-        voice_rec.register_event_subscriber("voice_input_ready",
-                                            "keyword_input",
-                                            android_input.need_input_handler)
-        android_input_thread: threading.Thread = threading.Thread(
-            target=android_input.start_input,
-            daemon=True
-        )
-        android_input_thread.start()
-        gui.register_subscriber("android-need-input",
-                                android_input.need_input_handler)
-        
-        tcp_server_handler = QueueHandler(tcp_serv.new_msg_to_write_handler)
-        formatter = logging.Formatter('%(message)s\n')
-        tcp_server_handler.setFormatter(formatter)
-        tcp_server_handler.setLevel(logging.INFO)
-        # logger.addHandler(tcp_server_handler)
+        def tts_finished_speaking_handler_tcp():
+            voice_rec.voice_start_handler()
+            gui.on_tts_end_handler()
+            tcp_serv.new_msg_to_write_handler("can speak")
+        tts.set_tts_end_handler(tts_finished_speaking_handler_tcp)
+
+
+        voice_rec.register_event_subscriber(
+            "voice_input_ready",
+            "tcp",
+            lambda: tcp_serv.new_msg_to_write_handler("can't speak"))
+
+            
+
+        tcp_server_thread = threading.Thread(
+            target = tcp_serv.start_server,
+            daemon=True)
+        tcp_server_thread.start()
 
     if gui.emotional_voice:
         gui.register_subscriber("done_choosing_llm_option", tts.add_text_handler)
@@ -1025,6 +1235,7 @@ if __name__ == "__main__":
 
     
     gui.register_subscriber("llm-reset-keywords", lambda : llm.voice_rec_input_handler("RESET"))
+    gui.register_subscriber("llm-repeat-keywords", llm.repeat_keywords_new_options_handler)
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
     gui.register_subscriber("llm-add-prompt", llm.add_prompt_handler)
     gui.register_subscriber("new-frame-to-record",
@@ -1056,14 +1267,13 @@ if __name__ == "__main__":
 
     gui.add_ui_component("llm-options", gui.render_llm_options)
     gui.add_ui_component("voice_rec_text", lambda x: x)
-    gui.add_ui_component("keyword_text", lambda x : x)
+    if gui.keyword_text:
+        gui.add_ui_component("keyword_text", gui.keyword_text_component.render_component)
     gui.add_ui_component("voice_recording_start", lambda x: x)
     gui.add_ui_component("emotion_options", gui.render_emotion_options)
     gui.add_ui_component("mediapipe", lambda: None)
-
-        
-    gui.add_ui_component("tts_indicator", gui.render_tts_indicator)
-
+    gui.add_ui_component("tts_indicator", gui.tts_indicator_component.render_component)
+    gui.add_ui_component("current_task", gui.current_task_component.render_component)
 
     voice_rec_thread: threading.Thread = threading.Thread(
         target=voice_rec.start_voice_input,
@@ -1086,7 +1296,8 @@ if __name__ == "__main__":
         daemon=True
     )
 
-    logger.info(f"Level: {args.level}")
+    logger.info(f"Condition: {args.condition}")
+
     gesture_rec_thread.start()
     voice_rec_thread.start()
     llm_thread.start()

@@ -1,0 +1,2 @@
+python survey_gui.py -lp ~/scifilab/realtime-llm/testing_demo_wednesday/interaction_log_03_20_2025_17_57_55.txt -vp /home/nam/scifilab/realtime-llm/testing_demo_wednesday/video/video_03_20_2025_17_57_55.mp4 -fp /home/nam/scifilab/realtime-llm/testing_demo_wednesday/video/frame_time_video_03_20_2025_17_57_55.csv -cp /home/nam/scifilab/realtime-llm/testing_demo_wednesday/video/clips -rp bruh.txt -c 2  
+

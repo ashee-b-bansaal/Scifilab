@@ -1,3 +1,4 @@
+import time
 import copy
 import os
 import cv2
@@ -21,6 +22,10 @@ class VideoRecorder():
         self.video_folder_path = video_folder_path
         self.video_filename = video_filename
         self.video_file_path = os.path.join(self.video_folder_path, self.video_filename)
+        self.frame_time_file_path = os.path.join(
+            self.video_folder_path,
+            f"frame_time_{self.video_filename[:-4]}.csv")
+        
         self.four_cc = cv2.VideoWriter_fourcc(*'mp4v')
         self.frame_size: Tuple[int, int] = frame_size
         self.FPS = 30.0
@@ -36,6 +41,9 @@ class VideoRecorder():
 
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()
         self.need_exit = False
+        self.frame_time_file = open(self.frame_time_file_path, "w")
+        
+        
 
     def register_event_subscriber(self,
                                   event_name: str,
@@ -65,6 +73,7 @@ class VideoRecorder():
 
     def graceful_exit(self):
         self.video_writer.release()
+        self.frame_time_file.close()
         print("video released")
 
     def write_video(self):
@@ -85,6 +94,7 @@ class VideoRecorder():
                         self.graceful_exit()
                         break
                     self.video_writer.write(frame)
+                    self.frame_time_file.write(f"{time.time()}\n")
                     self.need_write_new_frame = False
         except:
             traceback.print_exc()

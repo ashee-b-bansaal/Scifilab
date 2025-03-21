@@ -42,6 +42,7 @@ class TTS():
         self.voice= FEMALE_VOICE if gender=="female" else MALE_VOICE
         self.need_tts: bool = False
         self.need_tts_cond: threading.Condition = threading.Condition()
+        self.tts_end_handler = tts_end_handler
         self.tts_engine = AzureEngine(service_region="eastus",
                                       speech_key=AZURE_SPEECH_KEY,
                                       voice=self.voice
@@ -49,12 +50,23 @@ class TTS():
         self.output_device_index=output_device_index
         self.tts_stream = TextToAudioStream(
             engine=self.tts_engine,
-            on_audio_stream_stop = tts_end_handler,
+            on_audio_stream_stop = self.tts_end_handler,
             level=logging.INFO,
             frames_per_buffer=248,
             output_device_index=self.output_device_index
         )
         self.text_queue: queue.Queue = queue.Queue()
+        
+    def set_tts_end_handler(self, fn):
+        self.tts_end_handler = fn
+        self.tts_stream = TextToAudioStream(
+            engine=self.tts_engine,
+            on_audio_stream_stop = self.tts_end_handler,
+            level=logging.INFO,
+            frames_per_buffer=248,
+            output_device_index=self.output_device_index
+        )
+
 
     def add_text_handler(self, text:str):
         self.text_queue.put_nowait(text)
@@ -90,16 +102,17 @@ class TTS():
             
     
 if __name__ == "__main__":
-    logger = logging.getLogger(__name__)
-    a = TTS(lambda: print("done"), gender="female", logger=logger)
-    tts_thread: threading.Thread = threading.Thread(target = a.start_tts, daemon=True)
-    tts_thread.start()
-    a.add_tts_handler(Emotions.SAD,"The dog is running")
-    time.sleep(2)
+    pass
+    # logger = logging.getLogger(__name__)
+    # a = TTS(lambda: print("done"), gender="female", logger=logger)
+    # tts_thread: threading.Thread = threading.Thread(target = a.start_tts, daemon=True)
+    # tts_thread.start()
+    # a.add_tts_handler(Emotions.SAD,"The dog is running")
+    # time.sleep(2)
 
-    a.add_tts_handler(Emotions.ANGRY,"the weather is so nice today")
-    time.sleep(5)
-    print("done")
+    # a.add_tts_handler(Emotions.ANGRY,"the weather is so nice today")
+    # time.sleep(5)
+    # print("done")
 
 #     speech_config = speechsdk.SpeechConfig(subscription=os.environ.get('AZURE_SPEECH_KEY'), region="eastus")
 #     audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True)

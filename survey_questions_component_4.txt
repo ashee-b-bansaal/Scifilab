@@ -1,0 +1,5 @@
+1. How well does the progress bar help you perceive the spoken output? (1 = Not helpful at all, 7 = Very helpful)---RADIO
+2. If not, how could this interface be improved? (Open-ended response)---TEXT
+3. The current speech output uses a neutral voice. Would you prefer the option to select an emotional tone (e.g., “happy,” “sad,” “angry”, and “surprise”) before it is spoken aloud? (1 = Not willing to use, 7 = Very willing to use)---RADIO
+4. Please explain your reasoning:---TEXT
+5. Do you have any recommendations on improving the text-speech?---TEXT

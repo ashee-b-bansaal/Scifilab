@@ -1,0 +1,2 @@
+1. How well does this interface, especially when using a phrase-level input, help you communicate with hearing individuals? (1 = Not helpful at all, 7 = Very helpful)---RADIO
+2. Please explain your reasoning:---TEXT

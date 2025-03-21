@@ -1,0 +1,4 @@
+1. How would you rate the readability of the user interface for the recognized speech (blue background with white text)? (1 = Very unclear, difficult to read, 7 = Very clear, easy to read)---RADIO
+2. If you are not satisfied, why? What improvements would you suggest?---TEXT
+3. What do you think of the quality of the Automatic Speech Recognition system? Does it help you understand what hearing individuals are saying? (1 = Very poor quality, I can’t understand what is being said, 7 = Excellent quality, I can understand everything clearly)---RADIO
+4. If you are not satisfied, why? What improvements would you suggest?---TEXT

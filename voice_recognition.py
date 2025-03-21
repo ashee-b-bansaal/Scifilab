@@ -47,9 +47,9 @@ class VoiceRecognition():
         Records voice input from the microphone.
         """
         recognizer = sr.Recognizer()
-        with sr.Microphone(device_index=self.input_device_index) as source: 
-            print("adjusting for ambiant noise")
-            recognizer.adjust_for_ambient_noise(source)
+        # with sr.Microphone(device_index=self.input_device_index) as source: 
+        #     print("adjusting for ambiant noise")
+        #     recognizer.adjust_for_ambient_noise(source)
         with self.need_recording_cond:
             while True:
                 while not self.need_recording:
@@ -61,7 +61,7 @@ class VoiceRecognition():
                         audio = recognizer.listen(
                             source
                         )
-                        text = recognizer.recognize_google(audio)
+                        text = recognizer.recognize_openai(audio, language="en")
                     self.need_recording = False
                     print(f"Voice input recognized: {text}")
                     print(self.event_subscribers["voice_input_ready"].keys())
@@ -78,6 +78,13 @@ class VoiceRecognition():
                         "voice_input_ready",
                         "gui",
                         str(text))
+                    try: 
+                        self.notify_event_subscriber(
+                            "voice_input_ready",
+                            "tcp"
+                        )
+                    except:
+                        pass
                     print("done listening")
                 except sr.WaitTimeoutError:
                     pass

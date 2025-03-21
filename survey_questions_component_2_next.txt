@@ -1,0 +1,2 @@
+1 How well does ChatGPT generate other possible conversation sentences based on your sign language input?(1 = Very poorly, it generates irrelevant or incorrect sentences, 7 = Very well, it generates accurate and appropriate conversation options)---RADIO
+2. If you are not satisfied, why? What improvements would you suggest?---TEXT

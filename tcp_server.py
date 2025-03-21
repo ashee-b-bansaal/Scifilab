@@ -7,11 +7,9 @@ import socket
 from typing import Callable
 from events import Events, TCPServerEvents
 
-
 # Red rover at dorm
-IP = "10.49.46.5"
+IP = "10.49.89.239"
 PORT = 5432
-
 
 class TCPServer():
     def __init__(self, logger: logging.Logger, ip_address: str = IP, port: int = PORT):
@@ -45,10 +43,8 @@ class TCPServer():
         for d in self.event_subscribers[event].keys():
             self.notify_event_subscriber(event, d, *args)
 
-
     def new_msg_to_write_handler(self, msg: str):
         self.msg_q.put_nowait(msg)
-        print(msg)
         with self.new_msg_to_write_cond:
             self.new_msg_to_write = True
             self.new_msg_to_write_cond.notify()
@@ -60,13 +56,12 @@ class TCPServer():
         try:
            while True:
                 with self.new_msg_to_write_cond:
-                    while not self.new_msg_to_write or self.msg_q.empty():
-                        print("hello")
-                        self.new_msg_to_write_cond.wait()
+                    self.new_msg_to_write_cond.wait_for(lambda: self.new_msg_to_write or self.msg_q.qsize() != 0)
                     text: str = self.msg_q.get_nowait()
-                    print(text)
+                    print("text to write is", text)
+                    text = text + "\n"
                     client_socket.send(text.encode('utf-8'))
-                    self.logger.debug(f"text sent to {addr} is {text}")
+                    self.logger.debug(f"TCPServer sending: text sent to {addr} is {text}")
                     self.new_msg_to_write = False
         except:
             self.logger.exception(f"writing to {addr} failed")
@@ -78,7 +73,7 @@ class TCPServer():
         try: 
             while True:
                 data: bytes = client_socket.recv(1024)
-                self.logger.debug(f"data from {addr} is : {data.decode('utf-8')}")
+                self.logger.debug(f"TCPServer reading: data from {addr} is : {data.decode('utf-8')}")
                 print(data)
                 if not data:
                     break
@@ -92,7 +87,7 @@ class TCPServer():
             server.listen()
             while True:
                 client, addr = server.accept()
-                print(addr)
+                self.logger.debug(f"TCPServer: new connection {client} from {addr}")
                 with client:
                     write_thread = threading.Thread(
                         target=self.write_to_client_socket,

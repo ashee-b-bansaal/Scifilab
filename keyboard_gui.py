@@ -8,7 +8,9 @@ import dearpygui.dearpygui as dpg
 class KeyboardGUIInput():
     def __init__(self,
                  new_keyboard_input_handler_list: list[Callable],
-                 logger: logging.Logger
+                 logger: logging.Logger,
+                 switch_tasks=False,
+                 on_button_click = lambda: None
                  ) -> None:
 
         self.logger: logging.Logger = logger
@@ -38,14 +40,15 @@ class KeyboardGUIInput():
                 self._need_keyboard_input_bool = False
 
         self.new_keyboard_input_handler = _new_keyboard_input_handler
-
+        self.switch_tasks = switch_tasks
+        self.on_button_click = on_button_click
 
     def new_message_handler(self, msg: str):
         self.msg_queue.put_nowait(msg)
 
     def need_keyboard_input(self):
         with self._need_keyboard_input_lock:
-            print("BUHHHHHH")
+            # print("BUHHHHHH")
             self._need_keyboard_input_bool = True
 
         
@@ -74,6 +77,20 @@ class KeyboardGUIInput():
                     callback=self.new_keyboard_input_handler,
                 )
             dpg.bind_font(self.default_font)
+        if self.switch_tasks:
+            with dpg.window(tag="switch_task_window",
+                        label="Switch task window",
+                        width=600,
+                        height=800,
+                        on_close=dpg.stop_dearpygui):
+                with dpg.child_window(tag = "button_screen",
+                                      label="button screen",
+                                      ):
+                    dpg.add_button(
+                        label="switch task",
+                        callback=self.on_button_click)
+
+            
                 
     def exit(self):
         pass
@@ -81,7 +98,7 @@ class KeyboardGUIInput():
     def run(self):
         dpg.setup_dearpygui()
         self.show_ui()
-        dpg.show_viewport(minimized=True)
+        dpg.show_viewport(minimized=False)
 
         while dpg.is_dearpygui_running():
             if self.msg_queue.qsize() != 0:
