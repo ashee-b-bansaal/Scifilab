@@ -8,7 +8,7 @@ from typing import Callable
 from events import Events, TCPServerEvents
 
 # Red rover at dorm
-IP = "10.49.89.239"
+IP = "192.168.0.38"
 PORT = 5432
 
 class TCPServer():

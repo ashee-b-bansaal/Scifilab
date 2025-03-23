@@ -25,6 +25,10 @@ def generate_person_b_prompt(voice_rec_input: str, kbd_input: str):
     return f"Person A says: \"{voice_rec_input}\"." \
         f"Keywords for Person B are: {kbd_input}. "
 
+
+def generate_person_b_prompt_no_keywords(voice_rec_input: str):
+    return f"Person A says: \"{voice_rec_input}\. Please generate a {NUMBER_OF_OPTIONS} for person B based on what person A says. "
+
 def regenerate_person_b_prompt(new_keywords: str):
     return f"Please regerenate {NUMBER_OF_OPTIONS} responses for Person B responses based on these keywords:{new_keywords}"
 
@@ -46,6 +50,9 @@ class ChatGPTAPI():
         # the voice recognition thread will put the text
         # into this queue via the add_prompt_handler
         self.voice_rec_q: queue.Queue = queue.Queue()
+        self.last_voice_rec_text = ""
+
+
         
         # after the keyboard input is entered, a tuple of keyboard input and
         # text from voice_rec_q is added here

@@ -442,8 +442,8 @@ if __name__ == "__main__":
             video_path=args.video_path,
             frame_timestamp = frame_timestamp,
             event_timestamp = event_timestamp,
-            before_event_duration=[5 for _ in range(len(event_timestamp))],
-            after_event_duration=[3 for _ in range(len(event_timestamp))],
+            before_event_duration=[1 for _ in range(len(event_timestamp))],
+            after_event_duration=[2 for _ in range(len(event_timestamp))],
             clip_names=get_video_filename_list(event_lines),
             output_folder=args.clip_path
         )

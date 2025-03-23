@@ -1,19 +1,17 @@
 Order:
-1. Chicken Wings
-- 6 pcs, Boneless, BBQ Sauce
-2. Ribeye Steak- 12 oz,
+1. Ribeye Steak- 12 oz,
 - Medium-Rare, Mushroom Sauce
-3. Fries, No Salt
-4. Coke- Less Ice
+2. Fries, No Salt
+3. Coke- Extra Ice
 ---
 Quality Check & Complaint:
-1. Received mashed potatoes instead of fries
-2. Request correction,Overcooked steak
-3. Request replacement
-4. Complain about service
-5. Accept discount coupon as compensation
+1. Complain Overcooked steak
+2. Complain Slow service
+3. Accept compensation 
 ---
 Check-out:
-1. Express appreciation for service recovery
+1. Express appreciation
 2. Request a to-go box,
-3. Split the bill for individual orders
+3. Pay credit
+4. Split the bill
+

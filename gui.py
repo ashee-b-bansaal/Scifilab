@@ -550,7 +550,9 @@ class GUIClass():
         elif pressed_key == ord(' '):
             self.notify_subscriber("voice-start")
             self.render_ready["current_task"] = True
-            self.logger.info(f"Phase {self.current_task_index}: {self.tasks[self.current_task_index]}")
+            newline = "\n"
+            self.logger.info(
+                f"Phase {self.current_task_index}: {self.tasks[self.current_task_index].replace(newline, ',')}")
             
 
         elif pressed_key == ord('n'):
@@ -1119,7 +1121,7 @@ if __name__ == "__main__":
             new_keyboard_input_handler_list=[
                 llm.keyword_input_handler, gui.new_keyword_handler],
             logger=logger,
-            switch_tasks=False,
+            switch_tasks=True,
             on_button_click=gui.update_current_task_index
             
         )
@@ -1195,34 +1197,35 @@ if __name__ == "__main__":
         # switch_task_gui_t.start()
         pass
     elif args.task_input == "android":
-        tcp_serv = TCPServer(logger=logger)
-        def msg_recieved(msg):
-            # if msg == "next task\n":
-            gui.update_current_task_index()
-        tcp_serv.register_event_subscriber(
-            TCPServerEvents.MSG_RECEIVED,
-            "gui",
-            msg_recieved
-        )
+        pass
+        # tcp_serv = TCPServer(logger=logger)
+        # def msg_recieved(msg):
+        #     # if msg == "next task\n":
+        #     gui.update_current_task_index()
+        # tcp_serv.register_event_subscriber(
+        #     TCPServerEvents.MSG_RECEIVED,
+        #     "gui",
+        #     msg_recieved
+        # )
 
-        def tts_finished_speaking_handler_tcp():
-            voice_rec.voice_start_handler()
-            gui.on_tts_end_handler()
-            tcp_serv.new_msg_to_write_handler("can speak")
-        tts.set_tts_end_handler(tts_finished_speaking_handler_tcp)
+        # def tts_finished_speaking_handler_tcp():
+        #     voice_rec.voice_start_handler()
+        #     gui.on_tts_end_handler()
+        #     tcp_serv.new_msg_to_write_handler("can speak")
+        # tts.set_tts_end_handler(tts_finished_speaking_handler_tcp)
 
 
-        voice_rec.register_event_subscriber(
-            "voice_input_ready",
-            "tcp",
-            lambda: tcp_serv.new_msg_to_write_handler("can't speak"))
+        # voice_rec.register_event_subscriber(
+        #     "voice_input_ready",
+        #     "tcp",
+        #     lambda: tcp_serv.new_msg_to_write_handler("can't speak"))
 
             
 
-        tcp_server_thread = threading.Thread(
-            target = tcp_serv.start_server,
-            daemon=True)
-        tcp_server_thread.start()
+        # tcp_server_thread = threading.Thread(
+        #     target = tcp_serv.start_server,
+        #     daemon=True)
+        # tcp_server_thread.start()
 
     if gui.emotional_voice:
         gui.register_subscriber("done_choosing_llm_option", tts.add_text_handler)
