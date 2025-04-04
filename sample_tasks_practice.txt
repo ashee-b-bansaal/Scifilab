@@ -1,0 +1,6 @@
+Order:
+- Burger
+- Pepsi
+---
+Check-out:
+- Pay using cash 

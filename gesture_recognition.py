@@ -89,12 +89,15 @@ def pre_process_landmark(landmark_list):
 
 
 class GestureRecognition:
-    def __init__(self, logger: logging.Logger) -> None:
+    def __init__(self,
+                 logger: logging.Logger) -> None:
+                
         self.keypoint_classifier = KeyPointClassifier()
         mp_hands = mp.solutions.hands
+        self.logger = logger
         self.hands = mp_hands.Hands(
             static_image_mode=False,
-            max_num_hands=1,
+            max_num_hands=2,
             min_detection_confidence=0.7,
             min_tracking_confidence=0.5,
         )
@@ -106,8 +109,9 @@ class GestureRecognition:
         self.frames_q: queue.Queue = queue.Queue()
 
         self.event_subscribers : dict[str, dict[str, Callable]] = dict()
-        self.history_len = 8
+        self.history_len = 10
         self.prediction_history: deque = deque(maxlen=self.history_len)
+        self.prediction_history.append("0")
 
     def new_frame_handler(self, frame):
         self.frames_q.put_nowait(copy.deepcopy(frame))
@@ -139,77 +143,91 @@ class GestureRecognition:
                 results = self.hands.process(frame_rgb)
                 if results.multi_hand_landmarks is not None:
                     for hand_landmarks, handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
-                        # Bounding box calculation
-                        brect = calc_bounding_rect(frame, hand_landmarks)
-                        # Landmark calculation
-                        landmark_list = calc_landmark_list(frame, hand_landmarks)
-                        # Conversion to relative coordinates / normalized coordinates
-                        pre_processed_landmark_list = pre_process_landmark(
-                            landmark_list)
+                        if handedness.classification[0].label == "Left": 
+                            # Bounding box calculation
+                            brect = calc_bounding_rect(frame, hand_landmarks)
+                            # Landmark calculation
+                            landmark_list = calc_landmark_list(frame, hand_landmarks)
+                            # Conversion to relative coordinates / normalized coordinates
+                            pre_processed_landmark_list = pre_process_landmark(
+                                landmark_list)
 
-                        # Hand sign classification
-                        hand_sign_id = self.keypoint_classifier(pre_processed_landmark_list)
+                            # Hand sign classification
+                            hand_sign_id = self.keypoint_classifier(pre_processed_landmark_list)
 
-                        hand_sign = keypoint_classifier_labels[hand_sign_id]
-                        self.prediction_history.append(hand_sign)
-                        most_common_pred = Counter(
-                                    self.prediction_history).most_common()[0][0]
-                        self.notify_event_subscriber(
-                            "finished_processing_frame",
-                            "gui",
-                            self.draw_bounding_rectangle, brect, most_common_pred, landmark_list
-                        )
-                        self.need_response = False
+                            hand_sign = keypoint_classifier_labels[hand_sign_id]
+                            if hand_sign != "0":
+                                # print(hand_sign, self.prediction_history)
+                            
+                                self.prediction_history.append(hand_sign)
+                                most_common_pred = Counter(
+                                            self.prediction_history).most_common()[0][0]
+                                # self.logger.debug(self.prediction_history)
+                                # self.logger.debug(f"Hand sign detected: {most_common_pred}")
+                                self.notify_event_subscriber(
+                                            "finished_processing_frame",
+                                            "gui",
+                                            self.draw_bounding_rectangle, brect, most_common_pred, landmark_list, handedness
+                                )
+                            else:
+                                self.notify_event_subscriber(
+                                            "finished_processing_frame",
+                                            "gui",
+                                            self.draw_bounding_rectangle, brect, "0", landmark_list, handedness
+                                )       
+                            self.need_response = False
 
 if __name__ == "__main__":
-    cam = cv2.VideoCapture(0)
-    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cam.set(cv2.CAP_PROP_FPS, 30.0)
-    cam.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    gesture_rec = GestureRecognition()
-    gesture_rec_thread = threading.Thread(
-        target = gesture_rec.start_recognition,
-        daemon=True
-    )
-    gesture_rec_thread.start()
-    canvas = np.zeros((480, 640, 3), dtype=np.uint8)
-    render_functions = dict()
-    render_ready = dict()
+    pass
+
+    # cam = cv2.VideoCapture(0)
+    # cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    # cam.set(cv2.CAP_PROP_FPS, 30.0)
+    # cam.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    # gesture_rec = GestureRecognition()
+    # gesture_rec_thread = threading.Thread(
+    #     target = gesture_rec.start_recognition,
+    #     daemon=True
+    # )
+    # gesture_rec_thread.start()
+    # canvas = np.zeros((480, 640, 3), dtype=np.uint8)
+    # render_functions = dict()
+    # render_ready = dict()
 
     
-    def render_mediapipe(draw_bounding_rect, brect, hand_sign, landmark_list):
-        render_functions["mp"] = lambda: mp_drawing_utils.draw_gesture_and_landmarks_on_image(
-            canvas,
-            draw_bounding_rect,
-            brect,
-            hand_sign,
-            landmark_list)
-        print(hand_sign)
-        render_ready["mp"] = True
+    # def render_mediapipe(draw_bounding_rect, brect, hand_sign, landmark_list):
+    #     render_functions["mp"] = lambda: mp_drawing_utils.draw_gesture_and_landmarks_on_image(
+    #         canvas,
+    #         draw_bounding_rect,
+    #         brect,
+    #         hand_sign,
+    #         landmark_list)
+    #     print(hand_sign)
+    #     render_ready["mp"] = True
         
     
-    gesture_rec.register_event_subscriber(
-        "finished_processing_frame",
-        "gui",
-        render_mediapipe)
+    # gesture_rec.register_event_subscriber(
+    #     "finished_processing_frame",
+    #     "gui",
+    #     render_mediapipe)
 
     
-    while True:
-        ret, frame = cam.read()
-        if not ret:
-            break
-        key = cv2.waitKeyEx(1) & 0xFF
-        if key == 27:
-            break
+    # while True:
+    #     ret, frame = cam.read()
+    #     if not ret:
+    #         break
+    #     key = cv2.waitKeyEx(1) & 0xFF
+    #     if key == 27:
+    #         break
         
-        canvas = frame
-        gesture_rec.new_frame_handler(canvas)
-        for key in render_ready:
-            if render_ready[key]:
-                render_functions[key]()
-        cv2.imshow("testing gesture recognition", canvas)
-    cam.release()
+    #     canvas = frame
+    #     gesture_rec.new_frame_handler(canvas)
+    #     for key in render_ready:
+    #         if render_ready[key]:
+    #             render_functions[key]()
+    #     cv2.imshow("testing gesture recognition", canvas)
+    # cam.release()
     
         
     

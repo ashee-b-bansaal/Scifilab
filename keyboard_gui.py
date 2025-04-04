@@ -10,7 +10,7 @@ class KeyboardGUIInput():
                  new_keyboard_input_handler_list: list[Callable],
                  logger: logging.Logger,
                  switch_tasks=False,
-                 on_button_click = lambda: None
+                 on_button_click = lambda: None,
                  ) -> None:
 
         self.logger: logging.Logger = logger
@@ -25,8 +25,6 @@ class KeyboardGUIInput():
         self.msg_queue: queue.Queue = queue.Queue()
         self._need_keyboard_input_lock: threading.Lock = threading.Lock()
         self._need_keyboard_input_bool = False
-
-
         self._new_keyboard_input_handler_list: list[Callable] = new_keyboard_input_handler_list
         def _new_keyboard_input_handler(sender, app_data, user_data):
             dpg.mutex()
@@ -89,8 +87,6 @@ class KeyboardGUIInput():
                     dpg.add_button(
                         label="switch task",
                         callback=self.on_button_click)
-
-            
                 
     def exit(self):
         pass

@@ -1,17 +1,14 @@
-Order:
-1. Ribeye Steak- 12 oz,
-- Medium-Rare, Mushroom Sauce
-2. Fries, No Salt
-3. Coke- Extra Ice
+Tasks to Complete:
+- Ribeye Steak (12 oz, Medium Rare, Mushroom Sauce)
+- Fries, No Salt
+- Coke- Extra Ice
 ---
-Quality Check & Complaint:
-1. Complain Overcooked steak
-2. Complain Slow service
-3. Accept compensation 
+Tasks to Complete:
+- Complain Overcooked steak
+- Complain Slow service
+- Accept compensation 
 ---
-Check-out:
-1. Express appreciation
-2. Request a to-go box,
-3. Pay credit
-4. Split the bill
-
+Tasks to Complete:
+- Request a to-go box,
+- Pay credit
+- Split the bill

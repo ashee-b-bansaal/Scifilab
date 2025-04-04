@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import os
 import numpy as np
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 import tensorflow as tf
 
 
@@ -10,7 +8,7 @@ import tensorflow as tf
 class KeyPointClassifier(object):
     def __init__(
         self,
-        model_path='keypoint_classifier/keypoint_5_digits_and_ok_classifier.tflite',
+        model_path='keypoint_classifier/keypoint_all_data_classifier_with_nam.tflite',
         num_threads=1,
     ):
         self.interpreter = tf.lite.Interpreter(model_path=model_path,

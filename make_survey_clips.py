@@ -67,6 +67,11 @@ def make_clip_frame_indices(
         event_timestamp: list[float],
         before_event_duration: list[float],
         after_event_duration: list[float]):
+    """
+    from the timestamps of the chosen events and how much of the clips you want before and after,
+    produces the start and end frame indices.
+
+    """
     res = []
     for i in range(len(event_timestamp)):
         res.append(
@@ -78,7 +83,57 @@ def make_clip_frame_indices(
             ))
     return res
 
-
+def save_survey_clips_efficient(
+        video_path: str,
+        frame_timestamp: list[float],
+        event_timestamp: list[float],
+        before_event_duration: list[float],
+        after_event_duration: list[float],
+        clip_names: list[str],
+        output_folder: str
+        ):
+    assert len(before_event_duration) == len(after_event_duration) and len(before_event_duration) == len(event_timestamp)
+    
+    frame_indices = make_clip_frame_indices(
+        frame_timestamp,
+        event_timestamp,
+        before_event_duration,
+        after_event_duration
+    )
+    start_indices, end_indices = zip(*frame_indices)
+    video_filename_list = [os.path.join(output_folder, clip_names[i]) for i in range(len(event_timestamp))]
+    video_writer_list = []
+    four_cc = cv2.VideoWriter_fourcc(*'mp4v')
+    FPS = 30.0
+    frame_size = get_frame_size(video_path)
+    for i in range(len(video_filename_list)):
+        video_writer_list.append(cv2.VideoWriter(
+            video_filename_list[i],
+            four_cc,
+            FPS,
+            frame_size
+        ))
+        
+    cap = cv2.VideoCapture(video_path)
+    index = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("can't parse frame")
+            break
+        # has_vid = False
+        for i in range(len(video_writer_list)):
+            if index >= start_indices[i] and index < end_indices[i]:
+                video_writer_list[i].write(frame)
+                # has_vid = True
+        # print("bruh")
+        
+        index+= 1
+        # if has_vid == False:
+            # break
+    for i in range(len(video_writer_list)): video_writer_list[i].release()
+    cap.release()
+    
 def save_survey_clips(
         video_path: str,
         frame_timestamp: list[float],

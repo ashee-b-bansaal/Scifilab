@@ -5,7 +5,7 @@ import threading
 import datetime
 
 # TCP server configuration
-HOST = '192.168.0.38'  # Listen on all available interfaces
+HOST = '172.20.10.6'  # Listen on all available interfaces
 PORT = 9000       # Default port (same as in the Android app)
 BUFFER_SIZE = 1024
 

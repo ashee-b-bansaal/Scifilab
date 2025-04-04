@@ -1,0 +1,12 @@
+scenarios:
+- ask about vacaiton
+  - spot
+  - when
+  - with friends
+  - food
+- ask for directions
+- job interviews
+- ask about life, school, job etc
+  - ask about family
+  
+- birthday party

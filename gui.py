@@ -1,5 +1,3 @@
-from switch_tasks_gui import SwitchTaskGUI
-from functools import partial
 import logging
 import sys
 from camera_module import OpenCVCamera
@@ -8,26 +6,17 @@ from datetime import datetime
 import time
 import os
 import shutil
-import argparse
 import copy
 import cv2
 import numpy as np
 import threading
 import math
 from typing import Callable, Tuple, Union
-from voice_recognition import VoiceRecognition
 import textwrap
-from keyboard_gui import KeyboardGUIInput
-from kbd_input import KeyboardInput
-from video_recorder import VideoRecorder
-from chatgpt_api import ChatGPTAPI
-from android_input import AndroidInput
-from tcp_server import TCPServer, IP, PORT
-from tts import TTS, Emotions
-from events import TCPServerEvents, AndroidInputEvents
 import tracemalloc
 import mp_drawing_utils
-from gesture_recognition import GestureRecognition
+from tts import Emotions
+
 
 
 class QueueHandler(logging.Handler):
@@ -75,8 +64,12 @@ class TextComponent():
                  progress_bar: bool = False,
                  full_progress_time: float = 1.0, #progress will start counting once the compoent is rendered
                  full_progress_width: int = 0,
-                 bg_color=(255, 0, 0) ): # number of pixels
-        self.font_scale = 0.8
+                 bg_color=(255, 0, 0),
+                 font_scale: float = 0.8,
+                 font_thickness: int = 2,
+                 ): # number of pixels
+        self.font_scale = font_scale
+        self.font_thickness = font_thickness
         self.text = text
         self.bot_left = bot_left
         self.line_width = line_width
@@ -96,6 +89,9 @@ class TextComponent():
 
     def set_bot_left(self, bot_left):
         self.bot_left = bot_left
+    def set_full_progress_time(self, full_progress_time):
+        self.bot_left = full_progress_time
+
     
     def set_text(self, text):
         self.text = text
@@ -111,7 +107,7 @@ class TextComponent():
     def render_component(self, canvas):
             
         font_scale = self.font_scale
-        font_thickness = 2
+        font_thickness = self.font_thickness
         line_spacing = 10
         padding = 10
         
@@ -124,11 +120,11 @@ class TextComponent():
             total_height += text_height + line_spacing
 
         # Calculate background rectangle dimensions
-        rect_start = (self.bot_left[0], self.bot_left[1] - total_height - padding -10)
-        rect_end = (self.bot_left[0] + max_width + 2*padding, self.bot_left[1])
+        self.rect_start = (self.bot_left[0], self.bot_left[1] - total_height - padding -10)
+        self.rect_end = (self.bot_left[0] + max_width + 2*padding, self.bot_left[1])
 
         # Draw background rectangle
-        cv2.rectangle(canvas, rect_start, rect_end, self.bg_color, -1)
+        cv2.rectangle(canvas, self.rect_start, self.rect_end, self.bg_color, -1)
 
         # Draw text
         y = self.bot_left[1]
@@ -148,9 +144,9 @@ class TextComponent():
 
             cv2.line(
                 canvas,
-                (0, rect_start[1] - 5),
+                (0, self.rect_start[1] - 5),
                 # End at the calculated right position
-                (self.current_progress_bar_width, rect_start[1] - 5),
+                (self.current_progress_bar_width, self.rect_start[1] - 5),
                 (255, 0, 0),
                 thickness=3
             )
@@ -158,13 +154,12 @@ class TextComponent():
             cv2.line(
                 canvas,
                 # Start at the calculated bottom left
-                (0, rect_end[1]),
+                (0, self.rect_end[1]),
                 # End at the calculated bottom right
-                (self.current_progress_bar_width, rect_end[1]),
+                (self.current_progress_bar_width, self.rect_end[1]),
                 (255, 0, 0),
                 thickness=3
             )
-
 
 class OptionComponent():
     def __init__(self,
@@ -173,11 +168,13 @@ class OptionComponent():
                  bot_left: Tuple[int, int],
                  progress_100_callback: Callable,
                  progress_speed=2,
+                 show_bg=True,
                  value = None):
         """
         bot_left means the bottom left of where the intended string is
         supposed to go, which is the first line of the wrapped string
         """
+        self.show_bg = show_bg
         self.value = value
         self.text = text
         self.text_list = textwrap.wrap(text, line_width)
@@ -239,24 +236,24 @@ class OptionComponent():
             self.unbold()
         
         for i in range(len(self.text_list)):
-            (text_width, text_height), _ = cv2.getTextSize(self.text_list[i], cv2.FONT_HERSHEY_SIMPLEX, 1, self.thickness)
+            (text_width, text_height), _ = cv2.getTextSize(self.text_list[i], cv2.FONT_HERSHEY_SIMPLEX, 1.3, self.thickness)
             rect_start = (self.bot_left_list[i][0], self.bot_left_list[i][1] - text_height - 5)
             rect_end = (self.bot_left_list[i][0] + text_width, self.bot_left_list[i][1] + 10)
 
-
-            cv2.rectangle(
-                canvas,
-                rect_start,
-                rect_end,
-                (0, 0, 0),
-                -1
-            )
+            if self.show_bg:
+                cv2.rectangle(
+                    canvas,
+                    rect_start,
+                    rect_end,
+                    (0, 0, 0),
+                    -1
+                )
             cv2.putText(
                 canvas,
                 self.text_list[i],
                 self.bot_left_list[i],
                 cv2.FONT_HERSHEY_SIMPLEX,
-                1,
+                1.3,
                 self.color,
                 self.thickness,
                 cv2.LINE_AA)
@@ -374,13 +371,16 @@ class GUIClass():
                  black=False,
                  emotional_voice=False,
                  keyword_text=False,
-                 tasks: list[str] = [""]
-                 ) -> None:
+                 tasks: list[str] = [],
+                 tutorial: bool=False,
+                 image_context: bool=False) -> None:
+    
+    
         self.tasks = tasks
-        
         self.current_task_index_lock: threading.Lock = threading.Lock()
         self.current_task_index = 0
-
+        self.image_context = image_context
+        self.image_context_time_interval = 15.0
         
         self.logger = logger
         self.emotional_voice = emotional_voice
@@ -442,6 +442,11 @@ class GUIClass():
 
         # variables for llm rendering
         self.llm_options: list[OptionComponent] = []
+
+        self.tutorial = tutorial
+        if self.tutorial:
+            self.tutorial_options: list[OptionComponent] = []
+            
         self.selected_llm_option_index = -1
         self.number_of_llm_options = 5
         if self.emotional_voice: 
@@ -500,15 +505,35 @@ class GUIClass():
             self.frame_width,
             bg_color=(0, 165, 255)
         )
-        self.last_chosen_llm_option = ""
-        self.current_task_component = TextComponent(
-            self.tasks[0],
-            30,
-            (50, 390),
-            False,
-            bg_color=(0, 0, 0),
-        )
+        self.last_chosen_llm_option_text = ""
+        self.last_chosen_llm_option_bot_left = (0, 0)
+        self.has_tasks = len(self.tasks) > 0
+        if self.has_tasks:
+            font_scale = 0.6
+            bot_left = (10, 390)
+            bg_color = (0, 0, 0)
+    
+            if self.tutorial:
+                font_scale = 1.5
+                bot_left = (10, 200)
+                bg_color = (255, 0, 0)
+            self.current_task_component = TextComponent(
+                self.tasks[0],
+                30,
+                bot_left,
+                False,
+                bg_color=bg_color,
+                font_scale=font_scale,
+                font_thickness=2
+            )
+        speaker_image_path = "speaker_smaller.png"
+        self.speaker_icon = cv2.resize(cv2.imread(speaker_image_path), (50, 50))
+        if self.image_context:
+            self.last_image_context_time = time.time()
 
+
+
+        # llm option recieved time - voice rec recieve time = delay from llm for when 
 
     def register_subscriber(self, subscriber_name: str, fn: Callable):
         self.subscribers[subscriber_name] = fn
@@ -548,17 +573,21 @@ class GUIClass():
                     self.notify_subscriber(subscriber)
             print("esc done")
         elif pressed_key == ord(' '):
-            self.notify_subscriber("voice-start")
-            self.render_ready["current_task"] = True
-            newline = "\n"
-            self.logger.info(
-                f"Phase {self.current_task_index}: {self.tasks[self.current_task_index].replace(newline, ',')}")
-            
-
-        elif pressed_key == ord('n'):
-            # self.notify_subscriber("voice-start")
-            # self.render_ready["current_task"] = True
-            gui.update_current_task_index()
+            if not self.tutorial:
+                self.notify_subscriber("voice-start")
+                self.render_ready["current_task"] = True
+                newline = "\n"
+                if self.has_tasks:
+                    self.logger.info(
+                        f"Phase {self.current_task_index}: {self.tasks[self.current_task_index].replace(newline, ',')}")
+            else:
+                self.render_ready["llm-options"] = True
+                self.render_ready["current_task"] = True
+                newline = "\n"
+                if self.has_tasks:
+                    self.logger.info(
+                        f"Phase {self.current_task_index}: {self.tasks[self.current_task_index].replace(newline, ',')}")
+                
         elif pressed_key == 84:  # up arrow:
             if self.render_ready['llm-options']:
                 self.selected_llm_option_index = (
@@ -576,6 +605,10 @@ class GUIClass():
             if self.num_cam == 2:
                 ret_1, hand_frame = self.hand_cam.read()
                 ret_2, interaction_frame = self.interaction_cam.read()
+                if self.image_context and time.time() - self.last_image_context_time > self.image_context_time_interval:
+                    self.last_image_context_time = time.time()
+                    self.logger.debug(str(self.last_image_context_time))
+                    self.notify_subscriber("new-image-context", interaction_frame)
                 if not ret_1 or not ret_2:
                     print("can't parse frame")
                     break
@@ -591,6 +624,7 @@ class GUIClass():
             if self.num_cam == 2:
                 if interaction_frame.shape[0] != self.frame_height or interaction_frame.shape[1] != self.frame_width:
                     interaction_frame = cv2.resize(interaction_frame, (self.frame_width, self.frame_height), interpolation=cv2.INTER_LINEAR)
+        
             
             if self.black:
                 self.canvas = np.zeros((self.frame_height, self.frame_width, 3), dtype=np.uint8)
@@ -599,7 +633,7 @@ class GUIClass():
                     self.canvas = hand_frame
                 elif self.num_cam == 2:
                     self.canvas = interaction_frame
-
+            # self.render_ready["mediapipe"] = False
             # self.notify_subscriber("new-frame-to-process", cv2.flip(hand_frame, 1))
             self.notify_subscriber("new-frame-to-process", hand_frame)
             self.update_canvas(self.canvas)
@@ -637,46 +671,55 @@ class GUIClass():
         landmark_list)
         cv2.putText(canvas, f"Sign:{hand_sign}", (canvas.shape[1] - 250, canvas.shape[0] - 8), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2, cv2.LINE_AA)
         
-    def mediapipe_callback_handler(self, draw_bounding_rectangle, brect, hand_sign, landmark_list):
+    def mediapipe_callback_handler(self, draw_bounding_rectangle, brect, hand_sign, landmark_list, handedness):
         # self.logger.debug(f"mediapipe classify user gestures: {hand_sign}")
-        
-        self.render_functions["mediapipe"] = lambda canvas: self.render_mediapipe(
-            canvas,
-            draw_bounding_rectangle,
-            brect,
-            hand_sign,
-            landmark_list)
+        # if hand_sign == "0":
+            # self.render_ready["mediapipe"] = False
+            # return
+        if handedness.classification[0].label == "Left": 
+            # print(handedness)
+            self.render_functions["mediapipe"] = lambda canvas: self.render_mediapipe(
+                canvas,
+                draw_bounding_rectangle,
+                brect,
+                hand_sign,
+                landmark_list)
 
-        self.render_ready["mediapipe"] = True
-        if hand_sign == "OK":
-            if self.render_ready["emotion_options"] and self.selected_emotion_option_index >=0 and self.selected_emotion_option_index < self.number_of_emotion_options:
-                # print(hand_sign)
-                # self.logger.debug(f"user is selecting emotion index:  {self.selected_emotion_option_index}")
-                # self.emotion_options[self.selected_emotion_option_index].select()
-                # self.emotion_options[self.selected_emotion_option_index].update_progress()
+            self.render_ready["mediapipe"] = True
+            if hand_sign == "0":
+                return
+            if hand_sign == "OK":
+                if self.render_ready["emotion_options"] and self.selected_emotion_option_index >=0 and self.selected_emotion_option_index < self.number_of_emotion_options:
+                    # print(hand_sign)
+                    # self.logger.debug(f"user is  selecting emotion index:  {self.selected_emotion_option_index}")
+                    # self.emotion_options[self.selected_emotion_option_index].select()
+                    # self.emotion_options[self.selected_emotion_option_index].update_progress()
+                    for i in range(self.number_of_emotion_options):
+                        if i == self.selected_emotion_option_index:
+                            self.emotion_options[i].select()
+                        else:
+                            self.emotion_options[i].unselect()
+                if self.render_ready["llm-options"] and self.selected_llm_option_index >=0 and self.selected_llm_option_index < self.number_of_llm_options:
+                    # self.logger.debug(f"user is selecting llm index:  {self.selected_emotion_option_index}")
+                    for i in range(self.number_of_llm_options):
+                        if i == self.selected_llm_option_index:
+                            self.llm_options[i].select()
+                        else:
+                            self.llm_options[i].unselect()
+
+            else:
+
+                for i in range(len(self.llm_options)):
+                    self.llm_options[i].unselect()
                 for i in range(self.number_of_emotion_options):
-                    if i == self.selected_emotion_option_index:
-                        self.emotion_options[i].select()
-                    else:
-                        self.emotion_options[i].unselect()
-            if self.render_ready["llm-options"] and self.selected_llm_option_index >=0 and self.selected_llm_option_index < self.number_of_llm_options:
-                # self.logger.debug(f"user is selecting llm index:  {self.selected_emotion_option_index}")
-                for i in range(self.number_of_llm_options):
-                    if i == self.selected_llm_option_index:
-                        self.llm_options[i].select()
-                    else:
-                        self.llm_options[i].unselect()
-
-        else:
-            for i in range(len(self.llm_options)):
-                self.llm_options[i].unselect()
-            for i in range(self.number_of_emotion_options):
-                self.emotion_options[i].unselect()
-            if self.render_ready["llm-options"]:
-                self.update_selected_llm_option_mp(hand_sign)
-            if self.render_ready["emotion_options"]:
-                self.update_selected_emotion_option_mp(hand_sign)
-        
+                    self.emotion_options[i].unselect()
+                if self.render_ready["llm-options"]:
+                    self.update_selected_llm_option_mp(hand_sign)
+                if self.render_ready["emotion_options"]:
+                    self.update_selected_emotion_option_mp(hand_sign)
+        # else:
+            # self.render_ready["mediapipe"] = False
+                    
     ## LLM OPTIONS CODE SECTION
     def update_selected_llm_option_mp(self, hand_sign: str):
         self.selected_llm_option_index = int(hand_sign) - 1
@@ -686,6 +729,20 @@ class GUIClass():
             else:
                 self.llm_options[i].unhover()
 
+
+    def render_tts_indicator(self, canvas):
+        self.tts_indicator_component.render_component(canvas)
+        top_left_x, top_left_y = self.tts_indicator_component.rect_start
+        bot_right_x, bot_right_y = self.tts_indicator_component.rect_end
+
+        canvas[top_left_y: top_left_y + self.speaker_icon.shape[0], bot_right_x: bot_right_x + self.speaker_icon.shape[0]] = self.speaker_icon
+
+    def render_tutorial_options(self,
+                                canvas):
+        for i in range(len(self.tutorial_options)):
+            self.tutorial_options[i].update_progress()
+            self.turorial_options[i].render_component(canvas)
+        
             
     def render_llm_options(self, canvas):
         for i in range(len(self.llm_options)):
@@ -709,10 +766,11 @@ class GUIClass():
         print(llm_options)
         assert(len(llm_options) == self.number_of_llm_options - 2)
         self.llm_options.clear()
+        self.selected_llm_option_index = -1
         
         for i in range(len(llm_options)):
             if i == 0:
-                text_bottom_left = (self.frame_width//2, 200 + 100 * i)
+                text_bottom_left = (self.frame_width//2 - 200, 200 + 100 * i)
             else:
                 text_bottom_left = (
                     self.llm_options[i - 1].bot_left_list[-1][0],
@@ -721,17 +779,17 @@ class GUIClass():
                 OptionComponent(
                     llm_options[i],
                     line_width,
-                    text_bottom_left, self.llm_progress_full_handler))
+                    text_bottom_left, self.llm_progress_full_handler, show_bg=False))
         next_option_bottom_left = (
             self.llm_options[-1].bot_left_list[-1][0],
             self.llm_options[-1].bot_left_list[-1][1] + 2 * self.llm_options[-1].line_heights[-1])
 
         self.llm_options.append(
             OptionComponent(
-                "4. NEXT",
+                "4. NEXT OPTIONS",
                 line_width,
                 next_option_bottom_left,
-                self.llm_next_progress_full_handler))
+                self.llm_next_progress_full_handler, show_bg=False))
 
         reset_option_bottom_left = (
             self.llm_options[-1].bot_left_list[-1][0],
@@ -739,33 +797,50 @@ class GUIClass():
 
         self.llm_options.append(
             OptionComponent(
-                "5. RESET",
+                "5. SIGN",
                 line_width,
                 reset_option_bottom_left,
-                self.llm_reset_progress_full_handler))
+                self.llm_reset_progress_full_handler, show_bg=False))
 
         self.render_ready["llm-options"] = True
-        self.render_ready["voice_rec_text"] = False
 
     def llm_next_progress_full_handler(self):
         if self.render_ready['llm-options']:
-            self.logger.info("DHH: NEXT chosen")
+            self.logger.info("DHH: NEXT OPTIONS chosen")
             self.notify_subscriber("llm-repeat-keywords")
             # self.selected_llm_option_index = -1
             self.render_ready["llm-options"] = False
         
     def llm_reset_progress_full_handler(self):
         if self.render_ready['llm-options']:
-            self.logger.info("DHH: RESET chosen")
-            self.notify_subscriber(
-                "llm-reset-keywords"
-            )
+            self.logger.info("DHH: SIGN chosen")
             self.notify_subscriber("need-keyword-input")
-            # self.selected_llm_option_index = -1
             self.render_ready["llm-options"] = False
             if self.keyword_text:
                 self.render_ready["keyword_text"] = False
+
+
+    def tutorial_option_progress_full_handler(self):
+        if self.render_ready['llm-options']:
+            self.logger.info(f"DHH: {self.llm_options[self.selected_llm_option_index].text}")
             
+            self.last_chosen_llm_option_text = copy.deepcopy(self.llm_options[self.selected_llm_option_index].text)
+            self.last_chosen_llm_option_bot_left = copy.deepcopy(self.llm_options[self.selected_llm_option_index].bot_left_list[0])
+            if self.emotional_voice: 
+                self.render_ready["emotion_options"] = True
+                self.notify_subscriber(
+                    "done_choosing_llm_option", copy.deepcopy(self.llm_options[self.selected_llm_option_index].text))
+            else:
+                self.notify_subscriber(
+                    "done_choosing_llm_option_neutral",
+                    self.llm_options[self.selected_llm_option_index].text[3:]
+                )
+            for i in range(len(self.llm_options)):
+                self.llm_options[i].reset()
+            self.update_current_task_index()
+            self.selected_llm_option_index = -1
+            self.render_ready["llm-options"] = False
+
     def llm_progress_full_handler(self):
         if self.render_ready['llm-options']:
             self.logger.info(f"DHH: {self.llm_options[self.selected_llm_option_index].text}")
@@ -774,7 +849,8 @@ class GUIClass():
                 "B",
                 self.llm_options[self.selected_llm_option_index].text
             )
-            self.last_chosen_llm_option = copy.deepcopy(self.llm_options[self.selected_llm_option_index].text)
+            self.last_chosen_llm_option_text = copy.deepcopy(self.llm_options[self.selected_llm_option_index].text)
+            self.last_chosen_llm_option_bot_left = copy.deepcopy(self.llm_options[self.selected_llm_option_index].bot_left_list[0])
             self.render_ready["llm-options"] = False
             if self.keyword_text:
                 self.render_ready["keyword_text"] = False
@@ -836,9 +912,11 @@ class GUIClass():
         self.logger.info(f"Hearing: {text}")
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = TextComponent(
-            text, 25, (self.canvas.shape[1] // 2 - 100, self.canvas.shape[0] - 200))
+            text, 25, (self.canvas.shape[1] // 2 - 100, self.canvas.shape[0]))
         self.render_functions["voice_rec_text"] = lambda canvas: self.voice_rec_text_component.render_component(
             canvas)
+        if self.tutorial:
+            self.render_ready["llm-options"] = True
         
     def on_voice_recording_start(self):
         """
@@ -863,36 +941,33 @@ class GUIClass():
         self.render_ready["voice-recording-start"] = False
 
     def on_tts_start_handler(self):
-        self.logger.info(f"Speaking: {self.last_chosen_llm_option}")
-        self.tts_indicator_component.set_text(self.last_chosen_llm_option)
+        self.logger.info(f"Speaking Start: {self.last_chosen_llm_option_text}")
+        self.tts_indicator_component.set_text(self.last_chosen_llm_option_text)
         self.tts_indicator_component.set_bot_left(
-            self.llm_options[self.selected_llm_option_index].bot_left_list[0])
+            self.last_chosen_llm_option_bot_left)
+        num_words = len(self.last_chosen_llm_option_text[4:].split())
+        self.tts_indicator_component.set_full_progress_time(num_words * 0.5)
         self.tts_indicator_component.reset_progress()
         self.render_ready["tts_indicator"] = True
 
     def on_tts_end_handler(self):
-        self.logger.info(f"Speaking {self.last_chosen_llm_option} done")
+        self.logger.info(f"Speaking Finished: {self.last_chosen_llm_option_text}")
         self.render_ready["tts_indicator"] = False
+        self.voice_rec_text_component.set_text("Recording Voice")
+        self.render_ready["voice_rec_text"] = True
+        
+        if self.tutorial:
+            self.render_ready["llm-options"] = True
 
-    def render_current_task(self, canvas):
-        with self.current_task_index_lock:
-            cv2.putText(
-                canvas,
-                self.tasks[self.current_task_index],
-                (50, 500),
-                cv2.FONT_HERSHEY_COMPLEX,
-                1.0,
-                (255, 0, 255),
-                1
-            )
 
     def update_current_task_index(self):
-        with self.current_task_index_lock:
-            if self.current_task_index == len(self.tasks) - 1:
-                return
-            self.current_task_index += 1
-            self.current_task_component.set_text(self.tasks[self.current_task_index])
-            self.logger.info(f"Phase {self.current_task_index}:{self.tasks[self.current_task_index]}")
+        if self.has_tasks:
+            with self.current_task_index_lock:
+                if self.current_task_index == len(self.tasks) - 1:
+                    return
+                self.current_task_index += 1
+                self.current_task_component.set_text(self.tasks[self.current_task_index])
+                self.logger.info(f"Phase {self.current_task_index}:{self.tasks[self.current_task_index]}")
                 
 
 def display_top(snapshot, key_type='lineno', limit=15):
@@ -919,397 +994,5 @@ def display_top(snapshot, key_type='lineno', limit=15):
         print("%s other: %.1f KiB" % (len(other), size / 1024))
     total = sum(stat.size for stat in top_stats)
     print("Total allocated size: %.1f KiB" % (total / 1024))
-
-def parse_task_file(filename: str):
-    with open(filename, 'r') as f:
-        lines = ("\n".join([line.rstrip() for line in f])).split("\n---\n")
-    print(lines)
-    return lines
-    
-    
-if __name__ == "__main__":
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
-    
-    tracemalloc.start()
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument(
-        "-p",
-        "--path",
-        help="path to output the data like video, voice recording,...",
-        required=True)
-    parser.add_argument(
-        "-tp",
-        "--task-path",
-        help="path to output the task.txt file contaiing the differernt tasks",
-        default = "sample_tasks.txt"
-    )
-    parser.add_argument(
-        "-ti",
-        "--task-input",
-        help="whether to use the laptop gui or android phone to switch tasks",
-        choices = ["laptop", "android"],
-        default = 'laptop',
-        nargs = "?",
-        const = "laptop"
-    )
-    parser.add_argument(
-        "-fs",
-        "--fullscreen",
-        help="whether to display the gui in fullscreen",
-        action='store_true')
-    parser.add_argument(
-        "-wi",
-        "--word-input",
-        help="whether to use the keyboard or android phone to input keywords",
-        choices = ["keyboard", "android"],
-        default = 'android',
-        nargs = "?",
-        const = "android"
-    )
-    parser.add_argument(
-        "-b",
-        "--black",
-        help="whether to black out the screen to display on xreal glasses or not",
-        action="store_true"
-    )
-    parser.add_argument(
-        "-vg",
-        "--voice-gender",
-        help="gender",
-        choices=["female","male"],
-        default="male"
-    )
-    parser.add_argument(
-        "-d",
-        "--delete",
-        help="whether to delete the folder specified or not",
-        action="store_true"
-    )
-    parser.add_argument(
-        "-oi",
-        "--output_index",
-        help="audio output index, based on python -m sounddevice"
-    )
-    parser.add_argument(
-        "-ii",
-        "--input_index",
-        help="audio input index, based on list_audio_indices.py"
-    )
-    parser.add_argument(
-        "-c",
-        "--condition",
-        help = "select condition",
-        choices = ["1", "2", "3", "4", "5"],
-        required = True
-    )
-    parser.add_argument(
-        "-em",
-        "--emotional-voice",
-        help = "whether to use emotional voice or not",
-        action = "store_true"
-    )
-    
-
-    args = parser.parse_args()
-
-    folder_path = ""
-    video_path = ""
-
-    if os.path.exists(args.path):
-        if not args.delete:
-            print(
-                f"{args.path} already exists, do you want to delete the contents or no [y/n]")
-            while True:
-                delete_or_not = input()
-                if delete_or_not == "y":
-                    delete_contents_folder(args.path)
-                    os.mkdir(os.path.join(args.path, "video"))
-                    break
-                elif delete_or_not == "n":
-                    break
-                else:
-                    print("please only enter y or n:")
-        else:
-            delete_contents_folder(args.path)
-            os.mkdir(os.path.join(args.path, "video"))
-                
-    else:
-        os.mkdir(args.path)
-        os.mkdir(os.path.join(args.path, "video"))
-
-
-
-    ### initialize the files and folders
-    folder_path = args.path
-    video_path = os.path.join(args.path, "video")
-    time_rn = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
-    video_filename = f"video_{time_rn}.mp4"
-
-    # interaction log will log the non technical details of the interaction
-    # will log
-    # - what the llm choices are,
-    # - what the DHH person chooses,
-    # - what the hearing person says (voice rec)
-    # - what the interpreter sends
-    interaction_handler = logging.FileHandler(os.path.join(folder_path, f'interaction_log_{time_rn}.txt'))
-    interaction_handler.setLevel(logging.INFO)
-    formatter = logging.Formatter('%(asctime)s-%(levelname)s-%(message)s')
-
-    interaction_handler.setFormatter(formatter)
-    logger.addHandler(interaction_handler)
-
-    # debug log logs everything, when the threads recieve what, .... It is a superset of the
-    # interaction log
-    debug_handler = logging.FileHandler(os.path.join(folder_path, f'debug_log_{time_rn}.txt'))
-    debug_handler.setLevel(logging.DEBUG)
-    debug_handler.setFormatter(formatter)
-    logger.addHandler(debug_handler)
-
-
-    # socket_handler = PlainTextTcpHandler(host=IP, port=PORT)
-    # socket_handler.setLevel(logging.INFO)
-    # logger.addHandler(socket_handler)
-    
-    
-
-
-
-    ### start declaring the different components
-
-    exit_event: threading.Event = threading.Event()
-    hand_cam = OpenCVCamera(6, 720, 1280, 30.0)
-    interaction_cam = OpenCVCamera(4, 720, 1280, 30.0)
-    tasks = ["bruh"]
-    if args.task_path != "":
-        tasks = parse_task_file(args.task_path)
-    gui: GUIClass = GUIClass(exit_event=exit_event,
-                             fullscreen=args.fullscreen,
-                             black=args.black,
-                             hand_cam = hand_cam,
-                             interaction_cam=interaction_cam,
-                             logger=logger,
-                             emotional_voice=args.emotional_voice,
-                             tasks=tasks
-                             )
-    video_recorder = VideoRecorder(video_path, video_filename, frame_size=(gui.frame_width, gui.frame_height))
-    voice_rec: VoiceRecognition = VoiceRecognition(
-        input_device_index=args.input_index,
-        logger=logger)
-
-    llm: ChatGPTAPI = ChatGPTAPI(logger=logger)
-
-    def tts_finished_speaking_handler():
-        print(gui.llm_options[0].bot_left_list)
-        voice_rec.voice_start_handler()
-        gui.on_tts_end_handler()
-        
-
-    tts: TTS = TTS(
-        tts_start_handler=gui.on_tts_start_handler,
-        tts_end_handler=tts_finished_speaking_handler,
-        gender=args.voice_gender,
-        output_device_index=args.output_index,
-        logger=logger)
-    
-    gesture_rec: GestureRecognition = GestureRecognition(
-        logger=logger)
-    
-    if args.word_input == "keyboard":
-        keyboard_input = KeyboardGUIInput(
-            new_keyboard_input_handler_list=[
-                llm.keyword_input_handler, gui.new_keyword_handler],
-            logger=logger,
-            switch_tasks=True,
-            on_button_click=gui.update_current_task_index
-            
-        )
-        
-
-        # keyboard_input.register_event_subscriber("keyboard_input_ready",
-                                                 # "llm",
-                                                 # llm.keyword_input_handler)
-
-                
-        keyboard_input_log_handler = QueueHandler(
-            keyboard_input.new_message_handler)
-        
-        formatter = logging.Formatter('%(message)s\n')
-        keyboard_input_log_handler.setFormatter(formatter)
-        keyboard_input_log_handler.setLevel(logging.INFO)
-        logger.addHandler(keyboard_input_log_handler)
-        
-        voice_rec.register_event_subscriber(
-            "voice_input_ready",
-            "keyword_input",
-            keyboard_input.need_keyboard_input)
-
-        gui.register_subscriber("need-keyword-input",
-                                keyboard_input.need_keyboard_input)
-
-        keyboard_input_thread: threading.Thread = threading.Thread(
-            target=keyboard_input.run,
-            daemon=True
-        )
-
-        keyboard_input_thread.start()
-    elif args.word_input == "android":
-        
-        pass
-        # tcp_serv = TCPServer(logger=logger)
-        # android_input = AndroidInput(logger=logger)
-        # tcp_serv.register_event_subscriber(
-        #     TCPServerEvents.MSG_RECEIVED,
-        #     "android_input",
-        #     android_input.server_msg_received_handler
-        # )
-
-        # tcp_serv_thread = threading.Thread(target=tcp_serv.start_server, daemon=True)
-        # tcp_serv_thread.start()
-        # android_input.register_event_subscriber(AndroidInputEvents.INPUT_READY,
-        #                                         "llm",
-        #                                         llm.keyword_input_handler)
-        # android_input.register_event_subscriber(AndroidInputEvents.INPUT_READY,
-        #                                         "gui",
-        #                                         gui.new_keyword_handler)
-        # voice_rec.register_event_subscriber("voice_input_ready",
-        #                                     "keyword_input",
-        #                                     android_input.need_input_handler)
-        # android_input_thread: threading.Thread = threading.Thread(
-        #     target=android_input.start_input,
-        #     daemon=True
-        # )
-        # android_input_thread.start()
-        # gui.register_subscriber("need-keyword-input",
-        #                         android_input.need_input_handler)
-        
-        # tcp_server_handler = QueueHandler(tcp_serv.new_msg_to_write_handler)
-        # formatter = logging.Formatter('%(message)s\n')
-        # tcp_server_handler.setFormatter(formatter)
-        # tcp_server_handler.setLevel(logging.INFO)
-        # logger.addHandler(tcp_server_handler)
-
-
-    if args.task_input == "laptop":
-        # switch_task_gui = SwitchTaskGUI(gui.update_current_task_index)
-        # switch_task_gui_t = threading.Thread(target=switch_task_gui.run, daemon=True)
-        # switch_task_gui_t.start()
-        pass
-    elif args.task_input == "android":
-        pass
-        # tcp_serv = TCPServer(logger=logger)
-        # def msg_recieved(msg):
-        #     # if msg == "next task\n":
-        #     gui.update_current_task_index()
-        # tcp_serv.register_event_subscriber(
-        #     TCPServerEvents.MSG_RECEIVED,
-        #     "gui",
-        #     msg_recieved
-        # )
-
-        # def tts_finished_speaking_handler_tcp():
-        #     voice_rec.voice_start_handler()
-        #     gui.on_tts_end_handler()
-        #     tcp_serv.new_msg_to_write_handler("can speak")
-        # tts.set_tts_end_handler(tts_finished_speaking_handler_tcp)
-
-
-        # voice_rec.register_event_subscriber(
-        #     "voice_input_ready",
-        #     "tcp",
-        #     lambda: tcp_serv.new_msg_to_write_handler("can't speak"))
-
-            
-
-        # tcp_server_thread = threading.Thread(
-        #     target = tcp_serv.start_server,
-        #     daemon=True)
-        # tcp_server_thread.start()
-
-    if gui.emotional_voice:
-        gui.register_subscriber("done_choosing_llm_option", tts.add_text_handler)
-        gui.register_subscriber(
-            "done_choosing_emotion_option",
-            tts.add_emotion_handler
-        )
-    else:
-        gui.register_subscriber("done_choosing_llm_option_neutral", partial(tts.add_tts_handler, Emotions.NEUTRAL))
-
-    
-    gui.register_subscriber("llm-reset-keywords", lambda : llm.voice_rec_input_handler("RESET"))
-    gui.register_subscriber("llm-repeat-keywords", llm.repeat_keywords_new_options_handler)
-    gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
-    gui.register_subscriber("llm-add-prompt", llm.add_prompt_handler)
-    gui.register_subscriber("new-frame-to-record",
-                            video_recorder.new_frame_event_handler)
-    gui.register_subscriber("new-frame-to-process",
-                            gesture_rec.new_frame_handler)
-    gui.register_subscriber("video-record-exit",
-                           video_recorder.exit_event_handler)
-
-
-    voice_rec.register_event_subscriber("voice_input_ready",
-                                        "llm",
-                                        llm.voice_rec_input_handler)
-    
-    voice_rec.register_event_subscriber("voice_input_ready",
-                                        "gui",
-                                        gui.voice_input_ready_handler)
-    
-    
-    llm.register_event_subscriber(
-        "new-response",
-        "gui",
-        gui.llm_response_handler
-    )
-
-    gesture_rec.register_event_subscriber("finished_processing_frame",
-                                          "gui",
-                                          gui.mediapipe_callback_handler)
-
-    gui.add_ui_component("llm-options", gui.render_llm_options)
-    gui.add_ui_component("voice_rec_text", lambda x: x)
-    if gui.keyword_text:
-        gui.add_ui_component("keyword_text", gui.keyword_text_component.render_component)
-    gui.add_ui_component("voice_recording_start", lambda x: x)
-    gui.add_ui_component("emotion_options", gui.render_emotion_options)
-    gui.add_ui_component("mediapipe", lambda: None)
-    gui.add_ui_component("tts_indicator", gui.tts_indicator_component.render_component)
-    gui.add_ui_component("current_task", gui.current_task_component.render_component)
-
-    voice_rec_thread: threading.Thread = threading.Thread(
-        target=voice_rec.start_voice_input,
-        daemon=True
-    )
-    llm_thread: threading.Thread = threading.Thread(
-        target=llm.start_conversation,
-        daemon=True
-    )
-    
-    video_recorder_thread: threading.Thread = threading.Thread(
-        target=video_recorder.write_video
-    )
-    tts_thread: threading.Thread = threading.Thread(
-        target=tts.start_tts,
-        daemon=True
-    )
-    gesture_rec_thread: threading.Thread = threading.Thread(
-        target = gesture_rec.start_recognition,
-        daemon=True
-    )
-
-    logger.info(f"Condition: {args.condition}")
-
-    gesture_rec_thread.start()
-    voice_rec_thread.start()
-    llm_thread.start()
-    video_recorder_thread.start()
-    tts_thread.start()
-    gui.render()
-    
-    video_recorder_thread.join()
-    snapshot = tracemalloc.take_snapshot()
-    display_top(snapshot)
 
     

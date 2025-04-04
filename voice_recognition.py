@@ -1,14 +1,15 @@
 import logging
 import speech_recognition as sr
 import threading
-from typing import Callable
+from typing import Callable, Union
 import traceback
+
 
 
 class VoiceRecognition():
     def __init__(self,
                  logger: logging.Logger,
-                 input_device_index: int = -1) -> None:
+                 input_device_index: Union[int, None]) -> None:
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()
         self.logger = logger
         # the voice recognition thread should sleep (wait) until
@@ -47,33 +48,45 @@ class VoiceRecognition():
         Records voice input from the microphone.
         """
         recognizer = sr.Recognizer()
+        recognizer.energy_threshold = 200
+        
+        recognizer.pause_threshold = 1.2 # make it so that  little pauses inbetween speaking is fine
+
         # with sr.Microphone(device_index=self.input_device_index) as source: 
         #     print("adjusting for ambiant noise")
         #     recognizer.adjust_for_ambient_noise(source)
-        with self.need_recording_cond:
-            while True:
+
+
+        while True:
+            with self.need_recording_cond:
                 while not self.need_recording:
                     print("waiting for gui thread to request voice rec")
                     self.need_recording_cond.wait()
                 try:
                     print("started listening")
                     with sr.Microphone(device_index=self.input_device_index) as source:
+                        self.logger.info("Voice Recording Started")
                         audio = recognizer.listen(
                             source
                         )
-                        text = recognizer.recognize_openai(audio, language="en")
+                        self.logger.info("Voice Recognition Requested")
+                        text = recognizer.recognize_openai(audio,
+                                                           language="en",
+                                                           prompt="This is a restaurant setting")
                     self.need_recording = False
-                    print(f"Voice input recognized: {text}")
                     print(self.event_subscribers["voice_input_ready"].keys())
-                    self.notify_event_subscriber(
-                        "voice_input_ready",
-                        "llm",
-                        str(text)
-                    )
-                    self.notify_event_subscriber(
-                        "voice_input_ready",
-                        "keyword_input"
-                    )
+                    try: 
+                        self.notify_event_subscriber(
+                            "voice_input_ready",
+                            "llm",
+                            str(text)
+                        )
+                    except:
+                        pass
+                    # self.notify_event_subscriber(
+                        # "voice_input_ready",
+                        # "keyword_input"
+                    # )
                     self.notify_event_subscriber(
                         "voice_input_ready",
                         "gui",

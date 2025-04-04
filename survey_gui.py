@@ -1,3 +1,5 @@
+import ast
+import time
 import logging
 import numpy as np
 import os
@@ -7,7 +9,25 @@ import argparse
 import random
 import datetime
 import dearpygui.dearpygui as dpg
-from make_survey_clips import save_survey_clips, parse_frame_timestamp_file, get_frame_size
+from make_survey_clips import save_survey_clips, parse_frame_timestamp_file, get_frame_size, save_survey_clips_efficient
+import shutil
+
+
+def delete_contents_folder(folder: str):
+    """
+    deletes all the files in a folder
+    """
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        try:
+            if os.path.isfile(file_path) or os.path.islink(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print('Failed to delete %s. Reason: %s' % (file_path, e))
+
+
 
 
 #################
@@ -75,7 +95,7 @@ def extract_component_2_timestamps(event_log_filename: str, normal_number_cnt = 
         phase_lines = []
         for j in range(phase_indices[i - 1], phase_indices[i]):
             if "DHH:"  in lines[j]:
-                if "RESET" in lines[j] or "NEXT" in lines[j]:
+                if "SIGN" in lines[j] or "NEXT OPTIONS" in lines[j]:
                     component_2_lines.append(j)
                 else:
                     phase_lines.append(j)
@@ -92,7 +112,9 @@ def extract_component_2_timestamps(event_log_filename: str, normal_number_cnt = 
         if i in phase_indices:
             print(lines[i])
     component_2_timestamps = [convert_log_time_to_sec(lines[index].split('-INFO')[0]) for index in component_2_lines]
-    return [lines[index] for index in component_2_lines], component_2_timestamps
+    return component_2_lines, [lines[index] for index in component_2_lines], component_2_timestamps
+
+
 
 def frame_list_as_texture(frame_list, width, height):
     return [convert_cv_to_dpg(frame, width, height) for frame in frame_list]
@@ -158,9 +180,9 @@ def get_list_survey_questions(component_2_clips_name, condition: str):
         # survey_questions.append(deepcopy(component_2_questions))
         if "normal" in component_2_clips_name[i]:
             survey_questions.append(deepcopy(component_2_questions_normal))
-        elif "next" in component_2_clips_name[i]:
+        elif "next_options" in component_2_clips_name[i]:
             survey_questions.append(deepcopy(component_2_questions_next))
-        elif "reset" in component_2_clips_name[i]:
+        elif "sign" in component_2_clips_name[i]:
             survey_questions.append(deepcopy(component_2_questions_reset))
     # survey_questions.append(deepcopy(component_3_questions))
     # survey_questions.append(deepcopy(component_4_questions))
@@ -174,8 +196,12 @@ class SurveyGUI():
             self,
             component_2_clips_folder: str,
             survey_result_output_path: str,
-            condition: str
+            condition: str,
+            before_options_list: list[str],
+            after_options_list: list[str]
     ):
+        self.before_options_list = before_options_list
+        self.after_options_list = after_options_list
         self.condition = condition
         self.component_2_clips_folder: str = component_2_clips_folder
         
@@ -186,15 +212,13 @@ class SurveyGUI():
         
         self.component_2_clips_full_path: list[str] = [os.path.join(self.component_2_clips_folder, filename) for filename in self.component_2_clips_name]
         
-        # self.component_2_frame_width, self.component_2_frame_height = get_frame_size(self.component_2_clips_full_path[0])
+
         self.component_2_video_window_width = 640
         self.component_2_video_window_height = 480
         self.component_2_video_frame_index = 0
 
-
+        self.component_2_captures = [cv2.VideoCapture(clipname) for clipname in self.component_2_clips_full_path ]
         
-        self.component_2_video_frames = [frame_list_as_texture(frame_list, self.component_2_video_window_width, self.component_2_video_window_height) for frame_list in load_component_2_videos(self.component_2_clips_full_path)]
-
         # each of the item in this questions_list is a list of questions to show on 1 screen
         self.questions_list = get_list_survey_questions(
             self.component_2_clips_name,
@@ -243,23 +267,36 @@ class SurveyGUI():
         # self.delete_survey_questions(survey_questions_container_tag)
         question_cnt = 1
         print(question_list)
+        dpg.add_text(
+            "Options before are: " + self.before_options_list[self.current_questions_list_index],
+            wrap = self.window_width - 50,
+            label = "options before",
+            # show_label=True,
+            parent=survey_questions_container_tag)
+        dpg.add_text(
+            "Options after are: "  + self.after_options_list[self.current_questions_list_index],
+            wrap = self.window_width - 50,
+            label = "options after",
+            # show_label=True,
+            parent=survey_questions_container_tag)
         for question, q_type in question_list:
             assert q_type == "RADIO" or q_type == "TEXT"
             dpg.add_text(
                 question,
-                label = f"Question: {question_cnt}",
+                label = f"QUESTION: {question_cnt}",
+                # show_label=True,
                 wrap = self.window_width - 50,
                 parent = survey_questions_container_tag
             )
             if q_type == "TEXT":
                 dpg.add_input_text(
-                    label = f"INPUT Question: {question_cnt}",
+                    label = "INPUT",
                     parent = survey_questions_container_tag,
                     multiline=True)
             else:
                 survey_items = ["1 (Very Poorly)", "2", "3", "4", "5", "6", "7 (Very Well)"]
                 dpg.add_radio_button(
-                    label = f"INPUT Question: {question_cnt}",
+                    label = "INPUT",
                     parent = survey_questions_container_tag,
                     items = survey_items,
                     default_value = "1",
@@ -276,7 +313,7 @@ class SurveyGUI():
             child_label = dpg.get_item_label(child)
             if "INPUT" in child_label:
                 questions_input.append(child)
-            else:
+            if "QUESTION" in child_label:
                 questions.append(child)
         questions_answers = dpg.get_values(questions_input)
         questions_str = dpg.get_values(questions)
@@ -310,14 +347,13 @@ class SurveyGUI():
         self.load_new_survey_questions(
             "survey_questions",
             self.questions_list[self.current_questions_list_index])
-        # return
-        
-        # component_2_interaction_index = self.get_component_2_interaction_index()
-        # print(self.component_2_clips_name)
-        
 
     def run(self):
         dpg.create_context()
+        with dpg.font_registry():
+            # first argument ids the path to the .ttf or .otf file
+            self.default_font = dpg.add_font("NotoSerifCJKjp-Medium.otf", 22)
+
         dpg.create_viewport(title='Survey', width=self.window_width, height=self.window_height, resizable=False)
         dpg.setup_dearpygui()
         
@@ -331,13 +367,17 @@ class SurveyGUI():
         # print(self.component_2_video_window_height, self.component_2_frame_width)
 
 
-        with dpg.texture_registry(show=True):
+        with dpg.texture_registry(show=False):
             dpg.add_raw_texture(self.component_2_video_window_width,
                                 self.component_2_video_window_height,
                                 self.black_texture,
                                 tag="texture_tag",
                                 format=dpg.mvFormat_Float_rgb)
-        with dpg.window(label = "Survey Window", on_close=dpg.stop_dearpygui):
+        with dpg.window(
+                label = "Survey Window",
+                on_close=dpg.stop_dearpygui,
+                autosize=True
+        ):
             with dpg.child_window(tag="component_2_video",
                                   label="component 2 video",
                                   height = 480,
@@ -351,26 +391,45 @@ class SurveyGUI():
                                   height = 460,
                                   width = 800, 
                                   ):
+                # dpg.add
                 self.load_new_survey_questions("survey_questions", self.questions_list[0])
                 # the default should be the first questions list
                 pass
                 # self.
+                
 
             self.next_screen_button_tag = dpg.add_button(
                 label = "Next Interaction",
                 callback = self.next_interaction_button_handler)
+            dpg.bind_font(self.default_font)
         dpg.show_viewport(minimized=False)
         # dpg.start_dearpygui()
+
+
+        last_frame_time = time.time()
         
         while dpg.is_dearpygui_running():
             if self.current_component() == 2:
                 # print("bruh")
                 # print(self.get_component_2_interaction_index())
-                dpg.set_value(
-                    "texture_tag",
-                    self.component_2_video_frames[self.get_component_2_interaction_index()][self.component_2_video_frame_index])
-                self.component_2_video_frame_index = (self.component_2_video_frame_index + 1) % len(self.component_2_video_frames[self.get_component_2_interaction_index()])
+                # dpg.set_value(
+                    # "texture_tag",
+                    # self.component_2_video_frames[self.get_component_2_interaction_index()][self.component_2_video_frame_index])
+                # self.component_2_video_frame_index = (self.component_2_video_frame_index + 1) % len(self.component_2_video_frames[self.get_component_2_interaction_index()])
                 # print(self.component_2_video_frame_index)
+                if time.time() - last_frame_time > 0.03:
+                    last_frame_time = time.time()
+                    cap = self.component_2_captures[self.get_component_2_interaction_index()]
+
+                    ret, frame = cap.read()
+                    if ret:
+                       dpg.set_value(
+                           "texture_tag",
+                           convert_cv_to_dpg(frame,          self.component_2_video_window_width,                    self.component_2_video_window_height
+    ))
+                    else:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
             dpg.render_dearpygui_frame()
 
         
@@ -383,6 +442,71 @@ class SurveyGUI():
             # f.write('\n'.join(result))
         
 
+def before_after_duration_component_2_event(
+        lines: list[str],
+        component_2_index: int,
+        component_2_event: str,
+        component_2_timestamp: float
+):
+    assert lines[component_2_index] == component_2_event
+    
+    
+    before_duration = 0
+    before_options = ""
+    
+    for i in range(component_2_index, 0, -1):
+        if "ChatGPT" in lines[i]:
+            info, options = lines[i].split("ChatGPT:")
+            before_timestamp = convert_log_time_to_sec(lines[i].split('-INFO')[0])
+            before_duration = component_2_timestamp - before_timestamp
+            before_options = ";".join(ast.literal_eval(options))
+            break
+
+    after_duration = 0
+    after_options = ""
+    if "SIGN" in component_2_event or "NEXT OPTIONS" in component_2_event:
+        for i in range(component_2_index, len(lines)):
+            if "ChatGPT" in lines[i]:
+                info, options = lines[i].split("ChatGPT:")
+                after_timestamp = convert_log_time_to_sec(lines[i].split('-INFO')[0])
+                after_duration = after_timestamp - component_2_timestamp
+                after_options = ";".join(ast.literal_eval(options))
+                break
+            
+    return before_duration + 3, after_duration + 5
+                
+def before_after_options_component_2_event(
+        lines: list[str],
+        component_2_index: int,
+        component_2_event: str,
+        component_2_timestamp: float
+):
+    assert lines[component_2_index] == component_2_event
+    
+    
+    before_duration = 0
+    before_options = ""
+    
+    for i in range(component_2_index, 0, -1):
+        if "ChatGPT" in lines[i]:
+            info, options = lines[i].split("ChatGPT:")
+            before_timestamp = convert_log_time_to_sec(lines[i].split('-INFO')[0])
+            before_duration = component_2_timestamp - before_timestamp
+            before_options = ";".join(ast.literal_eval(options))
+            break
+
+    after_duration = 0
+    after_options = ""
+    if "SIGN" in component_2_event or "NEXT OPTIONS" in component_2_event:
+        for i in range(component_2_index, len(lines)):
+            if "ChatGPT" in lines[i]:
+                info, options = lines[i].split("ChatGPT:")
+                after_timestamp = convert_log_time_to_sec(lines[i].split('-INFO')[0])
+                after_duration = after_timestamp - component_2_timestamp
+                after_options = ";".join(ast.literal_eval(options))
+                break
+            
+    return before_options, after_options       
 
 
 if __name__ == "__main__":
@@ -423,34 +547,86 @@ if __name__ == "__main__":
     args = parser.parse_args()
     frame_timestamp = parse_frame_timestamp_file(args.frame_path)
     
-    event_lines, event_timestamp = extract_component_2_timestamps(args.log_path)
+    component_2_indices, event_lines, event_timestamp = extract_component_2_timestamps(args.log_path)
     print("event lines is", event_lines)
     def get_video_filename_list(event_lines):
         filename_list = []
         for i in range(len(event_lines)):
-            if "reset" in event_lines[i].lower():
-                filename_list.append(f"reset_component_2_interaction_{i}.mp4")
-            elif "next" in event_lines[i].lower():
-                filename_list.append(f"next_component_2_interaction_{i}.mp4")
+            if "SIGN" in event_lines[i]:
+                filename_list.append(f"sign_component_2_interaction_{i}.mp4")
+            elif "NEXT OPTIONS" in event_lines[i]:
+                filename_list.append(f"next_options_component_2_interaction_{i}.mp4")
             else:
                 filename_list.append(f"normal_component_2_interaction_{i}.mp4")
         return filename_list
-        
+    with open(args.log_path, 'r') as f:
+        lines = [line.rstrip() for line in f]        
 
     if args.make_video:
-        save_survey_clips(
+        if os.path.exists(args.clip_path):
+            print("Clips already exists, do you want to delete [y/n]")
+
+            while True:
+                delete_or_not = input()
+                if delete_or_not == "y":
+                    delete_contents_folder(args.clip_path)
+                    break
+                elif delete_or_not == "n":
+                    break
+                else:
+                    print("please only enter y or n:")
+        else:
+            os.mkdir(args.clip_path)
+
+
+        clip_names = get_video_filename_list(event_lines)
+
+        before_event_duration = []
+        after_event_duration = []
+
+        for i in range(len(event_timestamp)):
+            before_duration, after_duration = before_after_duration_component_2_event(
+                lines,
+                component_2_indices[i],
+                event_lines[i],
+                event_timestamp[i]
+            )
+            before_event_duration.append(before_duration)
+            after_event_duration.append(after_duration)
+            if "RESET" in event_lines[i]:
+                print("DURATION FOR RESET", before_duration, after_duration)
+            
+
+            
+                
+        save_survey_clips_efficient(
             video_path=args.video_path,
             frame_timestamp = frame_timestamp,
             event_timestamp = event_timestamp,
-            before_event_duration=[1 for _ in range(len(event_timestamp))],
-            after_event_duration=[2 for _ in range(len(event_timestamp))],
-            clip_names=get_video_filename_list(event_lines),
+            before_event_duration=before_event_duration,
+            after_event_duration=after_event_duration,
+            clip_names=clip_names,
             output_folder=args.clip_path
         )
+    before_options_list = []
+    after_options_list = []
+    for i in range(len(event_timestamp)):
+        before_options, after_options = before_after_options_component_2_event(
+            lines,
+            component_2_indices[i],
+            event_lines[i],
+            event_timestamp[i]
+        )
+        before_options_list.append(before_options)
+        after_options_list.append(after_options)
+
     survey = SurveyGUI(
         args.clip_path,
         args.result_path,
-        condition=args.condition)
+        condition=args.condition,
+        before_options_list=before_options_list,
+        after_options_list=after_options_list
+    )
     # survey.setup_ui_layout()g
     survey.run()
     print(event_lines)

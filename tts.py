@@ -45,7 +45,8 @@ class TTS():
         self.tts_end_handler = tts_end_handler
         self.tts_engine = AzureEngine(service_region="eastus",
                                       speech_key=AZURE_SPEECH_KEY,
-                                      voice=self.voice
+                                      voice=self.voice,
+                                      rate=2.0
                                       )
         self.output_device_index=output_device_index
         self.tts_stream = TextToAudioStream(
@@ -94,7 +95,7 @@ class TTS():
                     self.tts_stream.feed(text)
                     self.tts_stream.play()
                     self.need_tts = False
-                    self.logger.info(f"the tts spoke '{text}' with emotion '{emotion}'")
+
                     
         except:
             traceback.print_exc()
