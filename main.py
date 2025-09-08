@@ -95,8 +95,9 @@ def setup_data_collection_mode(
 
     voice_rec: VoiceRecognition = VoiceRecognition(
         input_device_index=input_index,
-        logger=logger)
-
+        logger=logger,
+        on_voice_recording_start=gui.on_voice_recording_start
+    )
 
     def tts_finished_speaking_handler():
         print(gui.llm_options[0].bot_left_list)
@@ -201,9 +202,7 @@ def setup_data_collection_mode(
     else:
         gui.register_subscriber("done_choosing_llm_option_neutral", partial(tts.add_tts_handler, Emotions.NEUTRAL))
 
-    
-    # gui.register_subscriber("llm-reset-keywords", lambda : llm.voice_rec_input_handler("RESET"))
-    gui.register_subscriber("llm-repeat-keywords", llm.repeat_keywords_new_options_handler)
+
     gui.register_subscriber("voice-start", voice_rec.voice_start_handler)
     gui.register_subscriber("llm-add-prompt", llm.add_prompt_handler)
     gui.register_subscriber("new-frame-to-record",

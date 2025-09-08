@@ -9,7 +9,9 @@ import traceback
 class VoiceRecognition():
     def __init__(self,
                  logger: logging.Logger,
-                 input_device_index: Union[int, None]) -> None:
+                 input_device_index: Union[int, None],
+                 on_voice_recording_start: Callable = lambda:None
+                 ) -> None:
         self.event_subscribers: dict[str, dict[str, Callable]] = dict()
         self.logger = logger
         # the voice recognition thread should sleep (wait) until
@@ -17,6 +19,14 @@ class VoiceRecognition():
         self.need_recording_cond: threading.Condition = threading.Condition()
         self.need_recording = False
         self.input_device_index=input_device_index
+
+        def _on_voice_recording_start():
+            self.logger.info("Voice Recording Start")
+            on_voice_recording_start()
+        self.on_voice_recording_start = _on_voice_recording_start
+        
+    def on_voice_recording_stop(self):
+        self.logger.info("Voice Recording Stop")
 
     def register_event_subscriber(self,
                                   event_name: str,
@@ -48,7 +58,7 @@ class VoiceRecognition():
         Records voice input from the microphone.
         """
         recognizer = sr.Recognizer()
-        recognizer.energy_threshold = 200
+        recognizer.phrase_threshold = 0.6
         
         recognizer.pause_threshold = 1.2 # make it so that  little pauses inbetween speaking is fine
 
@@ -65,9 +75,12 @@ class VoiceRecognition():
                 try:
                     print("started listening")
                     with sr.Microphone(device_index=self.input_device_index) as source:
-                        self.logger.info("Voice Recording Started")
+
+                        self.on_voice_recording_start()
                         audio = recognizer.listen(
-                            source
+                            source,
+                            on_recording_start=self.on_voice_recording_start,
+                            on_recording_stop=self.on_voice_recording_stop
                         )
                         self.logger.info("Voice Recognition Requested")
                         text = recognizer.recognize_openai(audio,

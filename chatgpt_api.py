@@ -22,20 +22,15 @@ NUM_WORDS = 7
 # DEFAULT_CONTEXT = f"Your role is to help facilitate a conversation happening between person A and person B. You will be given what person A says. You have to generate {NUMBER_OF_OPTIONS} short 1-sentence responses with less than {NUM_WORDS} words each on its own line with a number at the start for person B based on a few keywords. The responses should have different meaning but based on the same keywords. Person B will then choose one of these {NUMBER_OF_OPTIONS} responses and you should remember their response."
 
 # DEFAULT_CONTEXT = f"Your role is to help facilitate a conversation happening between person A and person B. You will be given what person A says. You have to generate {NUMBER_OF_OPTIONS} short 1-sentence responses each on its own line with a number at the start for person B based on a few keywords. The length of the responses should not be greater than 10 words. and proportional to the length of input provided, if only 1-3 words are provided as input, the options should contain around 5-7 words and if 5-7 words are provided, then each option should contain 10 words. In any situation, the length of each option should not go beyond 10 words at all. All the keywords provided as input should be present in each option. Do not cut off any part of the input words provided, if the user inputs 7 words, make sure to add those 7 words in all of the options.  The responses should have different meaning but based on the same keywords. Person B will then choose one of these {NUMBER_OF_OPTIONS} responses and you should remember their response."
-DEFAULT_CONTEXT = f"Your role is to help facilitate a conversation happening between person A and person B. You will be given what person A says. You have to generate {NUMBER_OF_OPTIONS} short 1-sentence responses each on its own line with a number at the start for person B strictly based on a few keywords provided for the query. The responses should be distinct and have different meaning from each other but based on the same keywords. The responses should also not add extraneous detail and only be based on the keywords provided for that query. The responses should also not exclude any detail from the keywords either. If no keywords are provided then generate the most likely responses to what person A said under 7 words. Person B will then choose one of these {NUMBER_OF_OPTIONS} responses and you should remember their response as context to generate further responses."
+DEFAULT_CONTEXT = f"Your role is to help facilitate a conversation happening between person A and person B. You will be given what person A says. You have to generate {NUMBER_OF_OPTIONS} short 1-sentence responses each on its own line with a number at the start for person B strictly based on a few keywords provided for the query. The responses should also not add extraneous detail and only be based on the keywords provided for that query. The responses should also not exclude any detail from the keywords either. If only 1 or 2 keywords are provided then make sure the options you generate are under 7 words.If no keywords are provided then generate the most likely responses to what person A said under 7 words. Person B will then choose one of these {NUMBER_OF_OPTIONS} responses and you should remember their response as context to generate further responses. Person B could also say 'Pardon?' do signify to person A to repeat what they said."
 
 
+def generate_person_b_prompt(voice_rec_input: str, kbd_input: str, image_context:str = ""):
+    return f"Optional context: {image_context}. Person A says: \"{voice_rec_input}\"." \
+        f"Please generate {NUMBER_OF_OPTIONS} short responses, max 15 words, for Person B based on the provided keywords. If only 1 or 2 keywords are provided then make sure the options you generate are under 7 words. Each response should appear on its own line. The keywords are:{kbd_input}. Make sure the options don't deviate"
 
-def generate_person_b_prompt(voice_rec_input: str, kbd_input: str):
-    return f"Person A says: \"{voice_rec_input}\"." \
-        f"Keywords for Person B are: {kbd_input}. "
-
-def generate_person_b_prompt_no_keywords(voice_rec_input: str):
-    return f"Person A says: \"{voice_rec_input}\". Please generate {NUMBER_OF_OPTIONS} repsonses person B and on its own line based on what person A says. "
-
-def regenerate_person_b_prompt(new_keywords: str):
-    return f"Please regenerate {NUMBER_OF_OPTIONS} distinct responses for Person B based on what person A said strictly based on these keywords:{new_keywords}"
-
+def generate_person_b_prompt_no_keywords(voice_rec_input: str, image_context: str = ""):
+    return f"Optional context: {image_context}. Person A says: \"{voice_rec_input}\". Please generate {NUMBER_OF_OPTIONS} repsonses each with different meaning under 7 words person B and on its own line based on what person A says. "
 
 def encode_image(image):
     retval, buffer = cv2.imencode('.jpg', image)
@@ -45,7 +40,7 @@ def encode_image(image):
 class ChatGPTAPI():
     def __init__(self,
                  logger: logging.Logger,
-                 model: str = "gpt-4o-mini",
+                 model: str = "gpt-4o",
                  use_surrounding_context: bool = False,
                  context_filename: str = ""):
         self.logger = logger
@@ -81,8 +76,10 @@ class ChatGPTAPI():
         self.has_new_image_cond: threading.Condition = threading.Condition()
         self.has_new_image = False
         self.image_q: queue.Queue = queue.Queue()
-            
 
+        self.image_context: str = "This is a conversation between 2 people."
+        self.img_cnt = 0
+            
     def initialize_chat(self, msg: str = DEFAULT_CONTEXT):
         with self.initialized_context_cond: 
             self.messages = [{
@@ -106,15 +103,18 @@ class ChatGPTAPI():
 
     def add_new_context_image(self, image):
         with self.has_new_image_cond:
-            self.image_q.put_nowait(image)
-            self.has_new_image = True
-            self.has_new_image_cond.notify_all()
+            if self.img_cnt % 10 == 0: 
+                self.image_q.put_nowait(image)
+                self.has_new_image = True
+                self.has_new_image_cond.notify_all()
+            self.img_cnt += 1
+
     
     def context_image_start(self):
         """
         the interaction camera thread will call this method, which sends the
         context image to chat gpt which sends back a string describing the
-        context of the situation to be used to initilize the chat.
+        context of the situation 
         """
         image_client = OpenAI()
         while True:
@@ -125,8 +125,7 @@ class ChatGPTAPI():
                 if self.image_q.qsize() == 0:
                     time.sleep(0.2)
                 frame = self.image_q.get_nowait()
-                self.logger.debug("new image being processed")
-            
+                self.logger.info("New image being processed")
                 response = image_client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
@@ -135,7 +134,7 @@ class ChatGPTAPI():
                             "content": [
                                 {
                                     "type": "text",
-                                    "text":"Person A is the one in the picture, the picture is taken from the point of view of Person B. They are in a restaurant. Can you describe the relationship between person A and person B and make it general, not too specific and short in 1 sentence",
+                                    "text":"Describe the context, with focus on the background, in fewer than 10 words",
                                 },
                                 {
                                     "type": "image_url",
@@ -146,7 +145,8 @@ class ChatGPTAPI():
                     ],
                 )
                 additional_context = response.choices[0].message.content
-                self.logger.debug("Context from image is"+ additional_context)
+                self.image_context = additional_context
+                self.logger.info("Context from image is: "+ additional_context)
                 self.has_new_image=False
         # print(additional_context)
         # self.initialize_chat(additional_context + DEFAULT_CONTEXT)
@@ -165,20 +165,21 @@ class ChatGPTAPI():
                 # print("text_input VOICEREC",text_input)
                 # if text_input == "RESET":
                 voice_input = self.last_voice_rec_text
+            
+                self.add_prompt_handler("A", generate_person_b_prompt(voice_input, keyword_input, self.image_context))
 
-                self.add_prompt_handler("A", generate_person_b_prompt(voice_input, keyword_input))
+                
                 print("REGEN", generate_person_b_prompt(voice_input, keyword_input))
                 # else:
                     # self.add_prompt_handler
                         # "A", generate_person_b_prompt(text_input, keyword_input))
             except:
-                self.add_prompt_handler("A", regenerate_person_b_prompt(keyword_input))
                 self.logger.exception("keyword input failed")
 
     def voice_rec_input_handler(self, voice_rec_input: str):
         with self.last_voice_rect_text_lock:
             self.last_voice_rec_text = voice_rec_input
-            self.add_prompt_handler("A", generate_person_b_prompt_no_keywords(voice_rec_input))
+            self.add_prompt_handler("A", generate_person_b_prompt_no_keywords(voice_rec_input, self.image_context))
 
     def add_prompt_handler(self, sender: str, text: str):
         """
@@ -196,17 +197,13 @@ class ChatGPTAPI():
 
     def start_conversation(self):
         try:
-            # wait until the context is initialized
-            # if self.use_surrounding_context:
-                # with self.initialized_context_cond: 
-                    # while not self.initialized_context:
-                        # self.initialized_context_cond.wait()
             while True:
                 with self.need_response_cond:
                     while not self.need_response:
                         self.need_response_cond.wait()
                     sender, text = self.prompt_q.get_nowait()
                     assert sender == "A" or sender == "B"
+                    self.logger.debug(f"New prompt is: {text}")
 
                     new_message = {
                         'role': 'user',

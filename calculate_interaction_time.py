@@ -1,3 +1,4 @@
+import ast
 import numpy as np
 from pprint import pprint
 import argparse
@@ -87,6 +88,19 @@ def number_of_sign_selection_dhh(event_list):
             num+= 1
             dhh_sign_events.append((timestamp, timestamp_str, event))
     return num, dhh_sign_events
+
+
+
+def number_of_pardon_selection_dhh(event_list):
+    num = 0
+    dhh_sign_events = []
+    for timestamp, timestamp_str, event in event_list:
+        print(event)
+        if event.startswith("DHH: 4. Can"):
+            num+= 1
+            dhh_sign_events.append((timestamp, timestamp_str, event))
+    return num, dhh_sign_events
+
 
 def number_of_next_options_selection_dhh(event_list):
     num = 0
@@ -179,17 +193,18 @@ if __name__ == "__main__":
     elif args.participant_number == 5:
         events_str = [event for timestamp, timestamp_str, event in events]
         start_event_index = index_string_startwith(events_str, "Voice Recording Started")
-        
-        
+    elif args.participant_number > 5:
+        events_str = [event for timestamp, timestamp_str, event in events]
+        start_event_index = index_string_startwith(events_str, "Voice Recording Start")
 
     events = events[start_event_index: ]
     for i, (timestamp, timestamp_str, event) in enumerate(events):
-        # if "Yeah, it's fine. What do you like" in event:
-            # start_event_index = i
-            # break
-        if  "Hearing: Yeah, sure. What do you" in event:
+        if "Yeah, it's fine. What do you like" in event:
             start_event_index = i
             break
+        # if  "Hearing: Yeah, sure. What do you" in event:
+            # start_event_index = i
+            # break
     print("start event index", start_event_index)
     # for event in events:
         # print("____", event, "____")
@@ -239,7 +254,7 @@ if __name__ == "__main__":
     interpreter_words_len = [len(w.split()) for w in interpreter_translated_phrases_list]
     
 
-    if args.participant_number == 5:
+    if args.participant_number >= 5:
         dhh_speaking_phrase_list = [event[-1][19:] for event in dhh_speaking_events_participant_5(events)]
     else:
         dhh_speaking_phrase_list = [event[-1][13:] for event in dhh_speaking_events(events)]
@@ -269,12 +284,17 @@ if __name__ == "__main__":
 
 
     print("#of sign selection (DHH)", number_of_sign_selection_dhh(events))
-    print("#of next selection (DHH)", number_of_next_options_selection_dhh(events))
+    if args.participant_number <= 5:
+        print("#of next selection (DHH)", number_of_next_options_selection_dhh(events))
+    else:
+        print("#of can you repeat that selection (DHH)", number_of_pardon_selection_dhh(events))
 
 
     conversation_start_prefix, conversation_end_prefix = None, None
     if args.participant_number == 5:
         conversation_start_prefix, conversation_end_prefix = "Voice Recording Started", "Speaking Finished"
+    elif args.participant_number > 5:
+        conversation_start_prefix, conversation_end_prefix = "Voice Recording Start", "Speaking Finished"
     elif args.participant_number < 5:
         conversation_start_prefix, conversation_end_prefix = "Hearing:", "the tts spoke"
 
@@ -292,26 +312,26 @@ if __name__ == "__main__":
             conversation_list[i].insert(0, conversation_list[i -1][-1])
 
 
-    for convo in conversation_list:
-        print("______")
-        for event in convo:print(event)
-        print("______")
+    # for convo in conversation_list:
+    #     print("______")
+    #     for event in convo:print(event)
+    #     print("______")
         
 
             
     convo_sign, convo_no_sign = conversations_with_and_without_sign(conversation_list)
 
 
-    # print("Conversations with sign")
-    # for convo in convo_sign:
-    #     print("------")
-    #     for event in (convo): print(event)
-    #     print("------")
-    # print("Conversations without sign")    
-    # for convo in convo_no_sign:
-    #     print("------")
-    #     for event in (convo): print(event)
-    #     print("------")
+    print("Conversations with sign")
+    for convo in convo_sign:
+        print("------")
+        for event in (convo): print(event)
+        print("------")
+    print("Conversations without sign")    
+    for convo in convo_no_sign:
+        print("------")
+        for event in (convo): print(event)
+        print("------")
 
     ################ CONVERSATIONS WITH SIGNING
     convo_sign_hearing, convo_sign_dhh = zip(*[hearing_dhh_sides_conversation(convo) for convo in convo_sign])
@@ -330,21 +350,33 @@ if __name__ == "__main__":
     print("Mean time of conversation with sign",np.mean(convo_sign_duration))
     # print("Std time of conversation with sign", np.std(convo_sign_duration))
     print("Mean time of conversation with sign only DHH side",np.mean(convo_sign_dhh_duration))
+
+
+    all_gpt_options_sign_dhh = []
+    for convo in convo_sign_dhh:
+        for timestamp, timestamp_str, event in convo:
+            if "ChatGPT:" in event:
+                options = ast.literal_eval(event[len("ChatGPT:"):])
+                all_gpt_options_sign_dhh.extend([(option[3:-2]) for  option in options])
+
+    all_gpt_options_sign_dhh_len = [len(option) for option in all_gpt_options_sign_dhh]
+    print("Mean length of gpt options for conversations with signing",np.mean(all_gpt_options_sign_dhh_len))
+    
+    
     ###############
 
     ############## CONVERSATIOSN WITH ONLY SELECTION
+    selected_option_1_cnt = 0
+    selected_option_2_cnt = 0
+    selected_option_3_cnt = 0    
+    all_gpt_options_no_sign_dhh = []
+    all_gpt_options_no_sign_dhh_len = []
     if len(convo_no_sign) > 0:
         convo_no_sign_hearing, convo_no_sign_dhh = zip(*[hearing_dhh_sides_conversation(convo) for convo in convo_no_sign])
 
         assert len(convo_no_sign_hearing)== len(convo_no_sign_dhh)          
 
         print("Number of conversations with only selection", len(convo_no_sign))
-
-
-
-
-
-
 
         convo_no_sign_duration = [convo[-1][0] - convo[0][0] for convo in convo_no_sign]
         convo_no_sign_dhh_duration = [convo[-1][0] - convo[0][0] for convo in convo_no_sign_dhh]
@@ -362,3 +394,58 @@ if __name__ == "__main__":
         # for i in range(len(events)):
             # print(convs[i])
             # print(events[i])
+
+        cnt = 0
+        for convo in convo_no_sign_dhh:
+            for timestamp, timestamp_str, event in convo:
+                if "ChatGPT:" in event:
+                    options = ast.literal_eval(event[len("ChatGPT:"):])
+                    all_gpt_options_no_sign_dhh.extend([(option[3:-2]) for  option in options])
+        # print(all_gpt_options_no_sign_dhh)
+
+        for convo in convo_no_sign_dhh:
+            for timestamp, timestamp_str, event in convo:
+                if "DHH: 1" in event:
+                    selected_option_1_cnt += 1
+                elif  "DHH: 2" in event:
+                    selected_option_2_cnt += 1
+                elif "DHH: 3" in event:
+                    selected_option_3_cnt += 1
+
+                    
+        all_gpt_options_no_sign_dhh_len = [len(option) for option in all_gpt_options_no_sign_dhh]
+        mean_gpt_option_len_no_sign = np.mean(all_gpt_options_no_sign_dhh_len)
+        number_of_gpt_option_len_no_sign = len(all_gpt_options_no_sign_dhh_len)
+        print("Mean length of gpt options for conversations with only selection",mean_gpt_option_len_no_sign)
+
+
+    all_gpt_options = all_gpt_options_sign_dhh + all_gpt_options_no_sign_dhh
+    print(all_gpt_options_sign_dhh)
+    print(all_gpt_options_no_sign_dhh)
+    mean_length_all_gpt_options = np.mean(all_gpt_options_sign_dhh_len + all_gpt_options_no_sign_dhh_len)
+    print("mean length of gpt options", mean_length_all_gpt_options)
+
+
+    print("Number of times DHH selected option 1 in conversations where they only used selection:", selected_option_1_cnt)
+    print("Number of times DHH selected option 2 in conversations where they only used selection:", selected_option_2_cnt)
+    print("Number of times DHH selected option 3 in conversations where they only used selection:", selected_option_3_cnt)
+
+
+    if args.participant_number > 5:
+        reading_time_no_sign = []
+        total_length_options_no_sign = []
+        for convo in convo_no_sign_dhh:
+            events_in_convo = [event for timestamp, timestamp_str, event in convo]
+            for i, (timestamp, timstamp_str, event) in enumerate(convo):
+                if "ChatGPT:" in event:
+                    selection_event_index = index_string_startwith(events_in_convo[i + 1: ], "DHH selection timestamp") + i + 1
+                    selection_timestamp = float(convo[selection_event_index][-1][len("DHH selection timestamp:"):])
+                    # print(selection_timestamp)
+                    reading_time_no_sign.append(selection_timestamp - timestamp)
+                    options = ast.literal_eval(event[len("ChatGPT:"):])
+                    total_length_options_no_sign.append(sum([len(option[3:-2]) for  option in options]))
+        print(list(zip(reading_time_no_sign, total_length_options_no_sign)))
+        
+
+
+        

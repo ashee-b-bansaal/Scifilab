@@ -1,3 +1,5 @@
+import argparse
+import azure.cognitiveservices.speech as speechsdk
 import logging
 import queue
 import logging
@@ -35,7 +37,9 @@ class TTS():
                  tts_end_handler: Callable,
                  logger: logging.Logger,
                  output_device_index=None,
+                 output_wavfile=None,
                  gender="female"):
+        self.output_wav_file = output_wavfile
         self.tts_start_handler = tts_start_handler
         self.logger = logger
         self.tts_q: queue.Queue = queue.Queue()
@@ -56,6 +60,8 @@ class TTS():
             frames_per_buffer=248,
             output_device_index=self.output_device_index
         )
+        self.tts_stream.output_wavfile=output_wavfile
+        print(self.tts_stream.output_wavfile)
         self.text_queue: queue.Queue = queue.Queue()
         
     def set_tts_end_handler(self, fn):
@@ -103,35 +109,41 @@ class TTS():
             
     
 if __name__ == "__main__":
-    pass
-    # logger = logging.getLogger(__name__)
-    # a = TTS(lambda: print("done"), gender="female", logger=logger)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--text")
+    parser.add_argument("--output-file")
+    args = parser.parse_args()
+    
+    logger = logging.getLogger(__name__)
+    # a = TTS(tts_start_handler = lambda:None,
+            # tts_end_handler = lambda:None,
+            # output_wavfile=args.output_file,
+            # logger = logger)
+            
     # tts_thread: threading.Thread = threading.Thread(target = a.start_tts, daemon=True)
     # tts_thread.start()
-    # a.add_tts_handler(Emotions.SAD,"The dog is running")
-    # time.sleep(2)
+    # a.add_tts_handler(Emotions.NEUTRAL,args.text)
+    # time.sleep(10)
 
-    # a.add_tts_handler(Emotions.ANGRY,"the weather is so nice today")
-    # time.sleep(5)
-    # print("done")
+    
+    speech_config = speechsdk.SpeechConfig(subscription=os.environ.get('AZURE_SPEECH_KEY'), region="eastus")
+    audio_config = speechsdk.audio.AudioOutputConfig(
+        use_default_speaker=True,
+        filename = args.output_file
+    )
+    speech_config.speech_synthesis_voice_name='en-US-JennyNeural'
+    speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
 
-#     speech_config = speechsdk.SpeechConfig(subscription=os.environ.get('AZURE_SPEECH_KEY'), region="eastus")
-#     audio_config = speechsdk.audio.AudioOutputConfig(use_default_speaker=True)
-#     speech_config.speech_synthesis_voice_name='en-US-AvaMultilingualNeural'
-#     speech_synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
-#     ssml = """
-#     <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
-#     <voice name="en-US-AvaMultilingualNeural">
-#         <mstts:express-as style="cheerful" styledegree="2">
-#             That'd be just amazing!
-#         </mstts:express-as>
-#         <mstts:express-as style="my-custom-style" styledegree="0.01">
-#             What's next?
-#         </mstts:express-as>
-#     </voice>
-# </speak>
-#     """
-#     speech_synthesizer.speak_ssml_async(ssml).get()
+    ssml = f"""
+    <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US">
+    <voice name="en-US-JennyNeural">
+        <mstts:express-as style="neutral">
+                {args.text}
+        </mstts:express-as>
+     </voice>
+ </speak>
+     """
+    speech_synthesizer.speak_ssml_async(ssml).get()
 
 
 

@@ -59,6 +59,38 @@ def hearing_speaking_events(event_list):
     return hearing_list
 
 
+
+def last_index_startswith(event_list, prefix: str):
+    index = -1
+    for i, (timestamp, timestamp_str, event) in enumerate(event_list):
+        if event.startswith(prefix):
+            index = i
+
+    return index
+
+def index_startswith(event_list, prefix: str):
+    for i, (timestamp, timestamp_str, event) in enumerate(event_list):
+        if event.startswith(prefix):
+            return i
+    return -1
+    
+
+def phone_typing_start_typing_to_end_tts(event_list):
+    pairs = []
+    tts_end_prefix = "TTS stopped speaking"
+    dhh_prefix = "DHH:"
+    for i, (timestamp, timestamp_str, event) in enumerate(event_list):
+        if event.startswith(dhh_prefix):
+            index_start_typing = last_index_startswith(event_list[:i], "DHH Start Typing")
+            start_typing_event = event_list[index_start_typing]
+            index_tts_end = index_startswith(event_list[i:], tts_end_prefix) + i
+            tts_end_event = event_list[index_tts_end]
+            pairs.append((start_typing_event, tts_end_event))
+    return pairs
+
+
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-p",
@@ -66,6 +98,7 @@ if __name__ == "__main__":
                         help = "path to interaction log file")
     args = parser.parse_args()
     events = parse_phone_log(args.path)
+    print(events)
     total_raw_time = events[-1][0] - events[0][0]
     print("Total raw time", total_raw_time)
 
@@ -112,9 +145,28 @@ if __name__ == "__main__":
 
 
 
-    total_typing_and_tts_time, typing_tts_pair = delay_between_2_events(events, "DHH Start Typing", "TTS stopped speaking:")
+    typing_tts_pair = phone_typing_start_typing_to_end_tts(events)
     typing_and_tts_time = [end[0] - start[0] for start, end in typing_tts_pair]
     print(typing_and_tts_time)
-    print("total typing and tts time", total_typing_and_tts_time)
-    print("mean typing and tts time", np.mean(typing_and_tts_time))
-    print("std typing and tts time", np.std(typing_and_tts_time))
+    # for start, end in typing_tts_pair:
+        # start_timestamp, start_timestamp_str, start_event = start
+        # end_timestamp, end_timestamp_str, end_event = end
+        # print("======START EVENT======")
+        # print(start_timestamp_str, start_event)
+        # print(end_timestamp_str, end_event)
+        # print(end_timestamp - start_timestamp)
+        # print("======END EVENT======")
+
+    total_time = events[-1][0] - events[0][0]
+    mean_typing_and_tts_time = np.mean(typing_and_tts_time)
+    std_typing_and_tts_time = np.std(typing_and_tts_time)
+    print("total time", events[-1][0] - events[0][0])
+    print("mean typing and tts time", mean_typing_and_tts_time)
+    print("std typing and tts time", std_typing_and_tts_time)
+    print("number of interaction", len(typing_and_tts_time))
+    print(total_time, mean_typing_and_tts_time, std_typing_and_tts_time, len(typing_and_tts_time),sep=",")
+
+    print("======================")
+
+
+

@@ -67,6 +67,7 @@ class TextComponent():
                  bg_color=(255, 0, 0),
                  font_scale: float = 0.8,
                  font_thickness: int = 2,
+                 text_color=(255, 255, 255)
                  ): # number of pixels
         self.font_scale = font_scale
         self.font_thickness = font_thickness
@@ -79,6 +80,7 @@ class TextComponent():
         print("text list for text component is ", self.text_list) 
         
         self.bg_color = bg_color
+        self.text_color = text_color
 
         self.progress_bar = progress_bar
         self.full_progress_time = full_progress_time
@@ -89,10 +91,10 @@ class TextComponent():
 
     def set_bot_left(self, bot_left):
         self.bot_left = bot_left
-    def set_full_progress_time(self, full_progress_time):
-        self.bot_left = full_progress_time
 
-    
+    def set_text_color(self, text_color):
+        self.text_color = text_color
+        
     def set_text(self, text):
         self.text = text
         self.text_list = self.text.split('\n')
@@ -132,7 +134,7 @@ class TextComponent():
             (_, text_height), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
             y -= text_height
             cv2.putText(canvas, line, (self.bot_left[0] + padding, y), 
-                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, self.text_color, font_thickness, cv2.LINE_AA)
             y -= line_spacing
 
         if self.progress_bar:
@@ -232,7 +234,7 @@ class OptionComponent():
             self.bold()
             self.color =  (0, 0, 255)
         else:
-            self.color =  (255, 255, 255)
+            self.color =  (0, 255, 255)
             self.unbold()
         
         for i in range(len(self.text_list)):
@@ -377,6 +379,7 @@ class GUIClass():
     
     
         self.tasks = tasks
+
         self.current_task_index_lock: threading.Lock = threading.Lock()
         self.current_task_index = 0
         self.image_context = image_context
@@ -446,8 +449,10 @@ class GUIClass():
         self.tutorial = tutorial
         if self.tutorial:
             self.tutorial_options: list[OptionComponent] = []
+            self.correct_selection = 0
             
         self.selected_llm_option_index = -1
+        self.selected_llm_option_timestamp = 0.0
         self.number_of_llm_options = 5
         if self.emotional_voice: 
             self.emotion_options: list[OptionComponent] = [
@@ -514,8 +519,8 @@ class GUIClass():
             bg_color = (0, 0, 0)
     
             if self.tutorial:
-                font_scale = 1.5
-                bot_left = (10, 200)
+                font_scale = 1.0
+                bot_left = (10, 150)
                 bg_color = (255, 0, 0)
             self.current_task_component = TextComponent(
                 self.tasks[0],
@@ -530,9 +535,8 @@ class GUIClass():
         self.speaker_icon = cv2.resize(cv2.imread(speaker_image_path), (50, 50))
         if self.image_context:
             self.last_image_context_time = time.time()
-
-
-
+            self.latest_interaction_frame = np.zeros((self.frame_height, self.frame_width, 3), dtype=np.uint8)
+            self.latest_interaction_frame_lock = threading.Lock()
         # llm option recieved time - voice rec recieve time = delay from llm for when 
 
     def register_subscriber(self, subscriber_name: str, fn: Callable):
@@ -605,10 +609,9 @@ class GUIClass():
             if self.num_cam == 2:
                 ret_1, hand_frame = self.hand_cam.read()
                 ret_2, interaction_frame = self.interaction_cam.read()
-                if self.image_context and time.time() - self.last_image_context_time > self.image_context_time_interval:
-                    self.last_image_context_time = time.time()
-                    self.logger.debug(str(self.last_image_context_time))
-                    self.notify_subscriber("new-image-context", interaction_frame)
+                if self.image_context:
+                    with self.latest_interaction_frame_lock:
+                        self.latest_interaction_frame = interaction_frame.copy()
                 if not ret_1 or not ret_2:
                     print("can't parse frame")
                     break
@@ -633,8 +636,7 @@ class GUIClass():
                     self.canvas = hand_frame
                 elif self.num_cam == 2:
                     self.canvas = interaction_frame
-            # self.render_ready["mediapipe"] = False
-            # self.notify_subscriber("new-frame-to-process", cv2.flip(hand_frame, 1))
+
             self.notify_subscriber("new-frame-to-process", hand_frame)
             self.update_canvas(self.canvas)
             if self.black:
@@ -684,6 +686,7 @@ class GUIClass():
                 brect,
                 hand_sign,
                 landmark_list)
+            timestamp = time.time()
 
             self.render_ready["mediapipe"] = True
             if hand_sign == "0":
@@ -706,7 +709,6 @@ class GUIClass():
                             self.llm_options[i].select()
                         else:
                             self.llm_options[i].unselect()
-
             else:
 
                 for i in range(len(self.llm_options)):
@@ -715,6 +717,7 @@ class GUIClass():
                     self.emotion_options[i].unselect()
                 if self.render_ready["llm-options"]:
                     self.update_selected_llm_option_mp(hand_sign)
+                    self.selected_llm_option_timestamp = timestamp
                 if self.render_ready["emotion_options"]:
                     self.update_selected_emotion_option_mp(hand_sign)
         # else:
@@ -784,12 +787,20 @@ class GUIClass():
             self.llm_options[-1].bot_left_list[-1][0],
             self.llm_options[-1].bot_left_list[-1][1] + 2 * self.llm_options[-1].line_heights[-1])
 
+        # self.llm_options.append(
+            # OptionComponent(
+                # "4. NEXT OPTIONS",
+                # line_width,
+                # next_option_bottom_left,
+                # self.llm_next_progress_full_handler, show_bg=False))
+
         self.llm_options.append(
             OptionComponent(
-                "4. NEXT OPTIONS",
+                "4. Can you repeat that?",
                 line_width,
                 next_option_bottom_left,
-                self.llm_next_progress_full_handler, show_bg=False))
+                self.llm_progress_full_handler, show_bg=False))
+
 
         reset_option_bottom_left = (
             self.llm_options[-1].bot_left_list[-1][0],
@@ -804,15 +815,26 @@ class GUIClass():
 
         self.render_ready["llm-options"] = True
 
-    def llm_next_progress_full_handler(self):
+
+    def pardon_option_progress_full_handler(self):
         if self.render_ready['llm-options']:
+            self.logger.info(f"DHH selection timestamp: {self.selected_llm_option_timestamp}")
             self.logger.info("DHH: NEXT OPTIONS chosen")
             self.notify_subscriber("llm-repeat-keywords")
             # self.selected_llm_option_index = -1
             self.render_ready["llm-options"] = False
-        
+
+    def llm_next_progress_full_handler(self):
+        if self.render_ready['llm-options']:
+            self.logger.info(f"DHH selection timestamp: {self.selected_llm_option_timestamp}")
+            self.logger.info("DHH: NEXT OPTIONS chosen")
+            self.notify_subscriber("llm-repeat-keywords")
+            # self.selected_llm_option_index = -1
+            self.render_ready["llm-options"] = False
+
     def llm_reset_progress_full_handler(self):
         if self.render_ready['llm-options']:
+            self.logger.info(f"DHH selection timestamp: {self.selected_llm_option_timestamp}")
             self.logger.info("DHH: SIGN chosen")
             self.notify_subscriber("need-keyword-input")
             self.render_ready["llm-options"] = False
@@ -822,10 +844,20 @@ class GUIClass():
 
     def tutorial_option_progress_full_handler(self):
         if self.render_ready['llm-options']:
+            self.logger.info(f"DHH selection timestamp: {self.selected_llm_option_timestamp}")            
             self.logger.info(f"DHH: {self.llm_options[self.selected_llm_option_index].text}")
             
             self.last_chosen_llm_option_text = copy.deepcopy(self.llm_options[self.selected_llm_option_index].text)
             self.last_chosen_llm_option_bot_left = copy.deepcopy(self.llm_options[self.selected_llm_option_index].bot_left_list[0])
+            chosen_number = int(self.last_chosen_llm_option_text[0])
+            task_number = -1
+            try:
+                task_number = int(self.tasks[self.current_task_index].split()[2])
+            except:
+                pass
+            if chosen_number == task_number:
+                self.correct_selection += 1
+            self.logger.info(f"Accuracy: {self.correct_selection}/{len(self.tasks)}")
             if self.emotional_voice: 
                 self.render_ready["emotion_options"] = True
                 self.notify_subscriber(
@@ -843,6 +875,7 @@ class GUIClass():
 
     def llm_progress_full_handler(self):
         if self.render_ready['llm-options']:
+            self.logger.info(f"DHH selection timestamp: {self.selected_llm_option_timestamp}")
             self.logger.info(f"DHH: {self.llm_options[self.selected_llm_option_index].text}")
             self.notify_subscriber(
                 "llm-add-prompt",
@@ -912,33 +945,26 @@ class GUIClass():
         self.logger.info(f"Hearing: {text}")
         self.render_ready["voice_rec_text"] = True
         self.voice_rec_text_component = TextComponent(
-            text, 25, (self.canvas.shape[1] // 2 - 100, self.canvas.shape[0]))
+            text,
+            25,
+            (self.canvas.shape[1] // 2 - 100, self.canvas.shape[0]),
+            text_color=(255, 255, 255)
+        )
         self.render_functions["voice_rec_text"] = lambda canvas: self.voice_rec_text_component.render_component(
             canvas)
         if self.tutorial:
             self.render_ready["llm-options"] = True
         
     def on_voice_recording_start(self):
-        """
-        Shows Recording Voice on screen to indicate that the hearing person's voice has been
-        picked up
-        """
-        self.render_ready["voice-recording-start"] = True
-        self.render_functions["voice-recording-start"] = lambda canvas: cv2.putText(
-            canvas,
-            "Recording Voice",
-            (100, 100),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (255, 0, 0),
-            2,
-            cv2.LINE_AA)
+        self.voice_rec_text_component.set_text("Recording Voice")
+        self.voice_rec_text_component.set_text_color((0, 255, 255))
+        self.render_ready["voice_rec_text"] = True
+        if self.image_context: 
+            self.notify_subscriber("new-image-context", self.latest_interaction_frame)
+       
 
     def on_voice_recording_stop(self):
-        """
-        removes the Recording Voice text on screen
-        """
-        self.render_ready["voice-recording-start"] = False
+        pass
 
     def on_tts_start_handler(self):
         self.logger.info(f"Speaking Start: {self.last_chosen_llm_option_text}")
@@ -953,8 +979,6 @@ class GUIClass():
     def on_tts_end_handler(self):
         self.logger.info(f"Speaking Finished: {self.last_chosen_llm_option_text}")
         self.render_ready["tts_indicator"] = False
-        self.voice_rec_text_component.set_text("Recording Voice")
-        self.render_ready["voice_rec_text"] = True
         
         if self.tutorial:
             self.render_ready["llm-options"] = True
@@ -994,5 +1018,3 @@ def display_top(snapshot, key_type='lineno', limit=15):
         print("%s other: %.1f KiB" % (len(other), size / 1024))
     total = sum(stat.size for stat in top_stats)
     print("Total allocated size: %.1f KiB" % (total / 1024))
-
-    
